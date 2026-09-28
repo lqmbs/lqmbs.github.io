@@ -1,13 +1,13 @@
 import * as THREE from 'three';
-import { CONFIG, FLOOR_THEMES } from './src/config.js';
-import { rand, clamp, damp, flicker, toRoman, chance, angleDiff } from './src/util.js';
+import { CONFIG, BIOMES } from './src/config.js';
+import { rand, clamp, damp, flicker, toRoman, chance, angleDiff, shuffle, pick } from './src/util.js';
 import { AudioEngine } from './src/audio.js';
 import { Input } from './src/input.js';
 import { RetroPass } from './src/post.js';
 import { ParticleSystem } from './src/particles.js';
 import * as Textures from './src/textures.js';
 import { Player, yawOf } from './src/player.js';
-import { DungeonFloor } from './src/chamber.js';
+import { DungeonFloor } from './src/floor.js';
 import { Hub } from './src/hub.js';
 import { HUD } from './src/hud.js';
 import { Menus } from './src/menus.js';
@@ -105,6 +105,10 @@ class Game {
       windowWarm: new THREE.MeshBasicMaterial({ color: 0xffa050 }),
       windowCold: new THREE.MeshBasicMaterial({ color: 0x4aa8ff }),
       shaft: new THREE.MeshBasicMaterial({ color: 0xffe8c8, transparent: true, opacity: 0.022, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }),
+      bark: new THREE.MeshStandardMaterial({ color: 0x4a3e32, roughness: 1, flatShading: true }),
+      leaf: [0x4e5c30, 0x5c6636, 0x3e4a28].map((c) => new THREE.MeshStandardMaterial({ color: c, roughness: 1, flatShading: true })),
+      moss: new THREE.MeshStandardMaterial({ color: 0x3a4a28, roughness: 1, polygonOffset: true, polygonOffsetFactor: -1, side: THREE.DoubleSide }),
+      lava: new THREE.MeshBasicMaterial({ color: 0xff6a1a }),
     };
     this.flameGeo = new THREE.BoxGeometry(0.05, 0.11, 0.05);
     this.riposteTexture = Textures.riposteGlyph();
@@ -162,6 +166,7 @@ class Game {
       this.sun.intensity = 1.7;
       this.sun.castShadow = true;
       this.lanternScale = 0.7;
+      this.fallY = -16;
       [-0.65, 1.2, 3.4].forEach((y, i) => {
         const m = this.mist[i];
         m.position.y = y;
@@ -174,26 +179,37 @@ class Game {
       this.audio.setMode('hub');
     } else {
       const t = this.theme;
+      const M = this.materials;
+      const sunlit = t.lighting === 'sun';
       this.scene.fog.color.setHex(t.fog);
-      this.scene.fog.density = CONFIG.fogDensity;
+      this.scene.fog.density = t.fogDensity;
       this.scene.background.setHex(t.fog);
       this.hemi.color.setHex(t.sky);
-      this.hemi.groundColor.setHex(0x0a0a12);
-      this.hemi.intensity = 0.95;
-      this.ambient.color.setHex(0x223055);
-      this.ambient.intensity = 0.35;
-      this.sun.intensity = 0;
-      this.sun.castShadow = false;
-      this.lanternScale = 1;
-      this.materials.crystal.color.setHex(t.crystal);
-      this.materials.crystal.emissive.setHex(t.crystal);
-      this.materials.windowCold.color.setHex(t.crystal);
-      [-5, -11, -19].forEach((y, i) => {
+      this.hemi.groundColor.setHex(sunlit ? 0x4a4838 : 0x0a0a12);
+      this.hemi.intensity = sunlit ? 0.7 : 0.95;
+      this.ambient.color.setHex(sunlit ? 0x8090a0 : 0x223055);
+      this.ambient.intensity = sunlit ? 0.18 : 0.35;
+      this.sun.intensity = sunlit ? 2.0 : 0;
+      this.sun.castShadow = sunlit;
+      this.lanternScale = sunlit ? 0.6 : 1;
+      M.floor.color.setHex(t.stone.floor);
+      M.brick.color.setHex(t.stone.brick);
+      M.trim.color.setHex(t.stone.trim);
+      M.rock.color.setHex(t.stone.rock);
+      M.crystal.color.setHex(t.crystal);
+      M.crystal.emissive.setHex(t.crystal);
+      M.crystal.emissiveIntensity = t.id === 'sunken' ? 1.4 : 1.05;
+      M.windowCold.color.setHex(t.crystal);
+      M.windowWarm.color.setHex(t.id === 'ember' ? 0xff5a20 : 0xffa050);
+      const heights = t.abyss === 'water' ? [-0.2, 1.4, 4] : t.abyss === 'lava' ? [-6, -9, -11] : t.abyss === 'clouds' ? [-4, -8, -14] : [-5, -11, -19];
+      const alphas = t.abyss === 'water' ? [0.3, 0.16, 0.08] : t.abyss === 'clouds' ? [0.75, 0.65, 0.55] : [0.55, 0.45, 0.35];
+      heights.forEach((y, i) => {
         const m = this.mist[i];
         m.position.y = y;
-        m.material.color.setHex(t.sky).multiplyScalar(0.9);
-        m.material.opacity = 0.55 - i * 0.1;
+        m.material.color.setHex(t.mist);
+        m.material.opacity = alphas[i];
       });
+      this.fallY = t.abyss === 'lava' ? -10 : -16;
       this.player.viewmodel.hemi.color.setHex(t.sky);
       this.player.viewmodel.hemi.intensity = 1.3;
       u.shadowTint.value.setHex(t.sky);
@@ -206,7 +222,7 @@ class Game {
     return { hp: 1 + 0.28 * d, damage: 1 + 0.15 * d, speed: 1 + 0.05 * d };
   }
 
-  get theme() { return FLOOR_THEMES[(this.depth - 1) % FLOOR_THEMES.length]; }
+  get theme() { return this.biome ?? BIOMES.crystal; }
 
   bindUI() {
     this.titleScreen = document.getElementById('title-screen');
@@ -276,6 +292,7 @@ class Game {
     this.depth = 1;
     this.floor?.dispose();
     this.floor = null;
+    this.biome = null;
     if (resetLoadout) this.player.resetLoadout();
     this.hub.build();
     this.setEnvironment('hub');
@@ -292,7 +309,9 @@ class Game {
     this.runTransition(() => {
       this.mode = 'run';
       this.depth = 1;
+      this.runBiomes = shuffle(Object.keys(BIOMES)).slice(0, EXPEDITION_FLOORS);
       this.hub.clearEnemies();
+      this.hub.exit();
       this.player.resetLoadout();
       this.hud.renderRelics(this.player);
       this.hud.renderLoadout(this.player);
@@ -302,15 +321,42 @@ class Game {
     }, 0.9);
   }
 
+  /** Raise the next floor: pick its biome, build every chamber and stitch them together. */
   newFloor() {
     this.floor?.dispose();
-    this.floor = new DungeonFloor(this, this.depth);
+    this.room = null;
+    this.biome = BIOMES[this.runBiomes?.[this.depth - 1] ?? pick(Object.keys(BIOMES))];
+    this.floor = new DungeonFloor(this, this.depth, this.biome);
     this.setEnvironment('depths');
-    const name = this.depth > FLOOR_THEMES.length ? `${this.theme.name} ${toRoman(this.depth)}` : this.theme.name;
+    this.floor.build();
+    const name = `${this.biome.name}`;
     this.hud.setFloor(this.depth, name);
     this.player.flasks = this.player.maxFlasks;
-    this.room = null;
-    this.enterRoom(this.floor.start, null);
+    this.particles.clear();
+    this.glow.clear();
+    for (const e of this.effects) e.dispose();
+    for (const b of this.bolts) b.dispose();
+    this.effects.length = 0;
+    this.bolts.length = 0;
+    this.room = this.floor.start;
+    this.placePlayer(this.floor.startPose);
+    this.switchRoom(this.floor.start);
+    this.floor.update(0, this.room);
+    this.lightTimer = 0;
+  }
+
+  /** The knight has walked into another chamber of the floor. */
+  switchRoom(room) {
+    this.room = room;
+    room.onPlayerEnter();
+    this.hud.drawMinimap(this.floor, room);
+  }
+
+  nearbyEnemies() { return this.mode === 'run' && this.floor ? this.floor.activeEnemies : this.room.enemies; }
+
+  nearbyInteractables() {
+    if (this.mode !== 'run' || !this.floor) return this.room.interactables || [];
+    return this.floor.active.flatMap((r) => r.interactables);
   }
 
   descend() {
@@ -332,7 +378,7 @@ class Game {
 
   /** Shared entry for any area (hub or chamber): swap scenes, place the knight, aim the lights. */
   enterArea(area, pose) {
-    this.room?.exit();
+    this.room?.exit?.();
     this.particles.clear();
     this.glow.clear();
     for (const e of this.effects) e.dispose();
@@ -345,12 +391,6 @@ class Game {
     this.placePlayer(pose);
     area.enter();
     this.assignLights(area);
-  }
-
-  enterRoom(room, entryDir) {
-    const pose = entryDir ? room.entryPose(entryDir) : { x: 0, y: 0, z: 3.4, yaw: 0 };
-    this.enterArea(room, pose);
-    this.hud.drawMinimap(this.floor, room);
   }
 
   placePlayer(pose) {
@@ -382,6 +422,28 @@ class Game {
       l.distance = s.distance ?? (s.kind === 'crystal' ? 15 : 13);
       l.userData.base = s.intensity ?? (s.kind === 'crystal' ? 10 + s.weight * 6 : 7 + s.weight * 4);
       l.userData.flicker = s.kind !== 'crystal';
+      l.userData.spot = s;
+    });
+  }
+
+  /** On a seamless floor, aim the light pool at the props nearest the knight. */
+  assignNearestLights() {
+    const p = this.player.pos;
+    const spots = this.floor.active.flatMap((r) => r.lightSpots);
+    const score = (s) => Math.hypot(s.pos.x - p.x, s.pos.z - p.z) - s.weight * 3 + (s.gate ? 4 : 0);
+    spots.sort((a, b) => score(a) - score(b));
+    const crystalColor = this.theme.crystal;
+    this.poolLights.forEach((l, i) => {
+      const s = spots[i];
+      if (!s) { l.userData.base = 0; return; }
+      if (l.userData.spot === s) return;
+      l.userData.spot = s;
+      l.position.copy(s.pos);
+      l.color.setHex(s.color ?? (s.kind === 'crystal' ? crystalColor : 0xff7a30));
+      l.distance = s.distance ?? (s.kind === 'crystal' ? 15 : 13);
+      l.userData.base = s.intensity ?? (s.kind === 'crystal' ? 10 + s.weight * 6 : 7 + s.weight * 4);
+      l.userData.flicker = s.kind !== 'crystal';
+      l.intensity = 0;
     });
   }
 
@@ -405,22 +467,15 @@ class Game {
     }
   }
 
-  checkRoomExit() {
-    const dir = this.room.exitDirection(this.player.pos);
-    if (!dir) return;
-    const next = this.room.neighbors[dir];
-    const back = { n: 's', s: 'n', e: 'w', w: 'e' }[dir];
-    this.runTransition(() => this.enterRoom(next, back));
-  }
-
   onPlayerFell() {
     if (this.transition) return;
     this.audio.play('fall');
     this.runTransition(() => {
       const p = this.player;
-      p.hp -= p.stats.maxHp * 0.2;
+      p.hp -= p.stats.maxHp * (this.theme.abyss === 'lava' ? 0.35 : 0.2);
       this.hurtFlash = 1;
-      this.placePlayer(this.entry.pose);
+      const safe = p.lastSafe ?? this.entry?.pose;
+      this.placePlayer({ x: safe.x, y: safe.y, z: safe.z, yaw: p.yaw });
       if (p.hp <= 0) p.die();
     }, 0.6);
   }
@@ -431,7 +486,7 @@ class Game {
   findFocus() {
     const p = this.player;
     let best = null, bestScore = Infinity;
-    for (const it of this.room.interactables || []) {
+    for (const it of this.nearbyInteractables()) {
       const pos = it.position;
       const d = Math.hypot(pos.x - p.pos.x, pos.z - p.pos.z);
       if (d > it.radius || Math.abs(pos.y - p.pos.y) > 2.2) continue;
@@ -529,7 +584,7 @@ class Game {
     this.glow.burst(c, 60, () => ({
       vel: new THREE.Vector3(rand(-9, 9), rand(-3, 6), rand(-9, 9)), life: rand(0.3, 0.8), size: rand(0.05, 0.12), color: pick3(), drag: 2.5,
     }));
-    for (const e of this.room.enemies) {
+    for (const e of this.nearbyEnemies()) {
       if (!e.active || e.pos.distanceTo(player.pos) > 9) continue;
       e.stun(1.8);
       e.ignite(4, 6);
@@ -748,8 +803,16 @@ class Game {
       this.room.update(realDt);
     } else if (!this.transition || this.transition.phase === 'in') {
       this.player.update(dt);
-      this.room.update(dt);
-      if (!this.transition && this.player.alive) this.checkRoomExit();
+      if (this.mode === 'run' && this.floor) {
+        const r = this.floor.roomAt(this.player.pos.x, this.player.pos.z);
+        if (r && r !== this.room) this.switchRoom(r);
+        this.floor.update(dt, this.room);
+        this.lightTimer -= realDt;
+        if (this.lightTimer <= 0) {
+          this.lightTimer = 0.35;
+          this.assignNearestLights();
+        }
+      } else this.room.update(dt);
       this.updateInteraction();
     } else {
       this.player.updateCamera(dt, 0);
@@ -798,7 +861,8 @@ class Game {
     }
     this.poolLights.forEach((l, i) => {
       const base = l.userData.base || 0;
-      l.intensity = base * (l.userData.flicker ? 0.8 + 0.2 * flicker(t, i * 5) : 0.85 + 0.15 * Math.sin(t * 1.3 + i * 2));
+      const target = base * (l.userData.flicker ? 0.8 + 0.2 * flicker(t, i * 5) : 0.85 + 0.15 * Math.sin(t * 1.3 + i * 2));
+      l.intensity = damp(l.intensity, target, 6, realDt);
     });
     const ped = this.room.pedestal;
     if (ped && !ped.taken) {

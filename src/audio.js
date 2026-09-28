@@ -280,6 +280,29 @@ export class AudioEngine {
       case 'gull':
         for (let i = 0; i < randInt3(); i++) this.tone({ t: i * 0.35, dur: 0.25, type: 'triangle', f: rand(1100, 1300), f2: rand(700, 850), gain: 0.025, attack: 0.03, dest: this.reverb });
         break;
+      case 'growl':
+        this.tone({ dur: 0.5, type: 'sawtooth', f: 80, f2: 60, gain: 0.12, attack: 0.05 });
+        this.noise({ dur: 0.5, type: 'lowpass', f: 300, gain: 0.25, attack: 0.05 });
+        break;
+      case 'groan':
+        this.tone({ dur: 1.1, type: 'sawtooth', f: 70, f2: 45, gain: 0.14, attack: 0.2 });
+        this.noise({ dur: 0.9, f: 260, q: 4, gain: 0.12, attack: 0.3 });
+        break;
+      case 'screech':
+        this.tone({ dur: 0.4, type: 'sawtooth', f: 900, f2: 1700, gain: 0.05, attack: 0.03 });
+        this.noise({ dur: 0.35, f: 2600, q: 5, gain: 0.08 });
+        break;
+      case 'fogwall':
+        this.noise({ dur: 1.5, f: 700, f2: 2400, q: 1, gain: 0.25, attack: 0.3 });
+        this.metal(220, 2.5, 0.12);
+        break;
+      case 'awaken':
+        this.tone({ dur: 1.4, type: 'sawtooth', f: 55, gain: 0.12, attack: 0.3 });
+        this.tone({ dur: 1.4, type: 'sawtooth', f: 58.3, gain: 0.12, attack: 0.3 });
+        break;
+      case 'splash':
+        this.noise({ dur: 0.18, f: 900, q: 0.8, gain: 0.08 });
+        break;
       case 'distant':
         this.noise({ dur: 2.2, type: 'lowpass', f: 180, gain: 0.25, attack: 0.6, dest: this.reverb });
         break;

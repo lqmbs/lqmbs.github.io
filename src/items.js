@@ -104,8 +104,8 @@ export class Pedestal {
     this.itemMesh = buildItemMesh(item);
     this.itemMesh.position.y = 1.6;
     this.rig.add(this.itemMesh);
-    chamber.group.add(this.group);
-    this.obstacle = chamber.world.addCircle(x, z, 0.7, y - 1, y + 1.3);
+    (chamber.actors || chamber.group).add(this.group);
+    this.obstacle = chamber.world.addCircleWorld(x, z, 0.7, y - 1, y + 1.3);
     if (!risen) {
       this.game.particles.burst(new THREE.Vector3(x, y + 0.2, z), 30, () => ({
         vel: new THREE.Vector3(rand(-3, 3), rand(1, 4), rand(-3, 3)), life: rand(0.6, 1.3), size: rand(0.08, 0.2), color: 0x3a3a40, gravity: 9, linger: true, floor: y,
@@ -168,7 +168,7 @@ export class Descent {
     const rune = new THREE.Mesh(new THREE.RingGeometry(1.45, 1.6, 32).rotateX(-Math.PI / 2), this.runeMat);
     rune.position.y = 0.03;
     this.group.add(rune);
-    chamber.group.add(this.group);
+    (chamber.actors || chamber.group).add(this.group);
   }
 
   update(dt) {

@@ -27,7 +27,7 @@ export class WeaponDrop {
     this.beam.visible = !rack;
     this.group.add(this.beam);
     this.setWeapon(weapon);
-    area.group.add(this.group);
+    (area.actors || area.group).add(this.group);
     area.loot.push(this);
     area.interactables.push(this);
   }
@@ -65,7 +65,7 @@ export class WeaponDrop {
   }
 
   remove() {
-    this.area.group.remove(this.group);
+    this.group.parent?.remove(this.group);
     this.area.loot.splice(this.area.loot.indexOf(this), 1);
     this.area.interactables.splice(this.area.interactables.indexOf(this), 1);
   }

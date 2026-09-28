@@ -85,20 +85,38 @@ An expedition is three floors. Clearing the third guardian brings you home.
 | Shade | Circles you, then shrieks and lunges. |
 | Lumen Acolyte | Keeps its distance and hurls crystal bolts. Parry a bolt to send it back at the caster. |
 | Geode Knight | Heavy knight with posture, an overhead chop, and a perilous thrust. |
+| Ember Hound | Fast pack hunter that circles and pounces, sometimes biting twice. |
+| Drowned | Bloated giant with a crushing slam and a perilous grab. |
+| Gargoyle | Hovers, rises with a screech, then dives. |
 | Guardian | Floor boss with three-hit combos, a wide sweep, and a perilous ground slam that marks its landing zone. |
 
-## World
+## Expeditions
 
-Each floor is an Isaac-style grid: a starting shrine, combat chambers, a reliquary with a free relic, and the guardian's arena on the farthest dead end. Combat chambers are dealt from six procedural archetypes, each re-randomised every time:
+An expedition is three floors, each drawn from a different biome:
 
-- **Nave** – a colonnaded cathedral hall with pointed arcades and a raised altar dais.
-- **Ring** – a circular walkway around a chasm, with spokes (bridges or stairs) to a central island.
-- **Terraces** – two or three tiers climbing to one side, joined by stairs.
-- **Causeway** – tower-top islands at different heights, linked as a tree of bridges and stairs.
-- **Grotto** – organic overlapping shelves beneath a stalactite-hung vault, choked with crystals.
-- **Spires** – the crowns of three drowned towers, bridged high over the dark.
+| Biome | Abyss | Character | Signature foe |
+| --- | --- | --- | --- |
+| The Sapphire Undercroft | Bottomless void | Blue crystal, towers with lit windows, stalactites | Geode Knight |
+| The Drowned Cathedral | Shallow flood you can wade through | Teal mist, glowing fungus, roots, vines, drowned spires | Drowned |
+| The Ember Fortress | A lava sea (falling costs more) | Red keep, lava cracks, spikes, chains, lava falls | Ember Hound |
+| The Sunlit Ruins | A sea of cloud under a sky | Daylight with sun shadows, grass, trees, mesas | Gargoyle |
 
-Gates sit on landings at the chamber's edges. They connect to the hub by bridges, and sometimes by stairs up or down, with a balcony on longer spans. Balustrades grow automatically along every open edge, with the occasional broken gap. Every chamber gets its own background: ranks of lit gothic towers, far-off arched bridges, crystal spires rising from the abyss, and drifting mist.
+**Floors are seamless.** A floor is an Isaac-style grid of chambers laid out as one continuous world. Neighbouring gatehouses are joined by real bridges and stairs, so you walk from chamber to chamber with no cut or fade. Neighbouring chambers stay visible through the fog, and the background, weather and abyss belong to the floor as a whole.
+
+**Encounters wake as you arrive.** Some foes wait in plain sight, slumped and still, and others claw out of the floor when you step into their chamber. A strike on a sleeping foe is a sneak attack and lands like a riposte. If you leave a chamber and get far away, its foes walk home and wait for you. Clearing a chamber raises a relic pedestal.
+
+**Only elite and guardian arenas seal.** A curtain of fog closes behind you there. An elite arena holds a *Champion* of the biome's signature breed (bigger, tougher, with a gold aura and a boss bar) and its retinue, and drops a rare weapon when cleared. The guardian's arena opens the descent to the next floor. Beating the third guardian ends the expedition and returns you to the Hold.
+
+Chamber layouts are dealt from six procedural archetypes, each re-randomised every time:
+
+- **Nave**: a colonnaded cathedral hall with pointed arcades and a raised altar dais.
+- **Ring**: a circular walkway around a chasm, with spokes to a central island.
+- **Terraces**: two or three tiers climbing to one side, joined by stairs.
+- **Causeway**: tower-top islands at different heights, linked by bridges and stairs.
+- **Grotto**: organic overlapping shelves beneath a stalactite-hung vault.
+- **Spires**: the crowns of three drowned towers, bridged high over the dark.
+
+Balustrades grow automatically along every open edge, except in the flood, where the edges drop into shallow water.
 
 ## Look
 
@@ -116,9 +134,12 @@ style.css         HUD, typography, CRT scanline overlay
 game.js           Game: loop, floor/chamber flow, combat feedback (hitstop, slow-mo, shake, sparks)
 src/config.js     Tunables, floor themes, directions, room states
 src/util.js       Math helpers, gothic arch geometry, GeoBatch (static-geometry merging)
-src/physics.js    World: walkable surfaces (rect/ramp/disc/ring), obstacles, slide-and-fall movement
+src/physics.js    World: walkable surfaces (rect/ramp/disc/ring/terrain), obstacles, slide-and-fall movement, per-chamber offsets
 src/architecture.js  Builder: platforms, bridges, stairs, pillars, arcades, crystals, towers, parapets, vista
-src/chamber.js    Chamber state machine, gates, layout archetypes, decoration, DungeonFloor generation
+src/floor.js      Seamless floor: grid generation, passages between chambers, vista, abyss, visibility
+src/chamber.js    A chamber of a floor: gateways, fog walls, decoration, dormant encounters
+src/layouts.js    The six chamber archetypes plus shrine, reliquary and arena
+src/sky.js        Painterly sky dome
 src/player.js     First-person controller, loadout, guard/parry/block, attacks, spells, skills, flasks, viewmodel
 src/enemies.js    Enemy base (posture, blocking, telegraphs, stun, burn), Hollow, Shade, Acolyte, Geode Knight, Warden, Training Dummy, Bolt
 src/items.js      Relics, pedestals, the descent well

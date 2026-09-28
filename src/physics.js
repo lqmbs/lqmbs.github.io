@@ -14,6 +14,33 @@ export class World {
     this.circles = [];
     this.boxes = [];
     this.minWalkY = -Infinity;
+    // Surfaces and obstacles are stored in chamber-local coordinates; queries arrive in world
+    // coordinates and are shifted by this offset (zero while a chamber is being built).
+    this.ox = 0;
+    this.oz = 0;
+  }
+
+  setOffset(x, z) {
+    this.ox = x;
+    this.oz = z;
+  }
+
+  /** Copy another (offset-free) world's contents in, shifted into this world's local space. */
+  absorb(other, { skip = [] } = {}) {
+    const dx = -this.ox, dz = -this.oz;
+    for (const s of other.surfaces) {
+      if (skip.includes(s.tag)) continue;
+      this.surfaces.push({ ...s, cx: s.cx + dx, cz: s.cz + dz });
+    }
+    for (const c of other.circles) this.circles.push({ ...c, x: c.x + dx, z: c.z + dz });
+    for (const b of other.boxes) this.boxes.push({ ...b, x0: b.x0 + dx, x1: b.x1 + dx, z0: b.z0 + dz, z1: b.z1 + dz });
+  }
+
+  /** Does a world-space point sit inside a solid obstacle or block of ground? */
+  hitsObstacle(p, minRadius = 0.3) {
+    const x = p.x - this.ox, z = p.z - this.oz;
+    if (this.localSurfaceBlocks(x, z, p.y - 0.1, 0.2)) return true;
+    return this.circles.some((c) => c.enabled && c.r > minRadius && p.y > c.y0 && p.y < c.y1 && Math.hypot(x - c.x, z - c.z) < c.r);
   }
 
   addSurface(s) {
@@ -44,6 +71,9 @@ export class World {
   addField(fn, { tag = 'terrain' } = {}) {
     return this.addSurface({ kind: 'field', fn, top: Infinity, bottom: -Infinity, parapet: false, tag });
   }
+
+  /** Add an obstacle given in world coordinates (for props placed after a chamber is built). */
+  addCircleWorld(x, z, r, y0, y1) { return this.addCircle(x - this.ox, z - this.oz, r, y0, y1); }
 
   addCircle(x, z, r, y0, y1) {
     const c = { x, z, r, y0, y1, enabled: true };
@@ -88,8 +118,12 @@ export class World {
     return null;
   }
 
-  /** Highest ground under (x, z) that can be stood on from `feetY` (i.e. no taller than a step). */
+  /** Highest ground under world (x, z) that can be stood on from `feetY` (no taller than a step). */
   groundAt(x, z, feetY = Infinity, step = STEP_HEIGHT) {
+    return this.localGroundAt(x - this.ox, z - this.oz, feetY, step);
+  }
+
+  localGroundAt(x, z, feetY = Infinity, step = STEP_HEIGHT) {
     let best = null;
     for (const s of this.surfaces) {
       const h = this.heightOf(s, x, z);
@@ -99,6 +133,10 @@ export class World {
   }
 
   surfaceBlocks(x, z, feetY, height) {
+    return this.localSurfaceBlocks(x - this.ox, z - this.oz, feetY, height);
+  }
+
+  localSurfaceBlocks(x, z, feetY, height) {
     for (const s of this.surfaces) {
       const h = this.heightOf(s, x, z);
       if (h === null || h <= feetY + STEP_HEIGHT) continue;
@@ -110,15 +148,25 @@ export class World {
 
   blockedAt(x, z, r, feetY, height) {
     const k = r * 0.85;
-    return this.surfaceBlocks(x, z, feetY, height)
-      || this.surfaceBlocks(x + k, z, feetY, height)
-      || this.surfaceBlocks(x - k, z, feetY, height)
-      || this.surfaceBlocks(x, z + k, feetY, height)
-      || this.surfaceBlocks(x, z - k, feetY, height);
+    x -= this.ox;
+    z -= this.oz;
+    return this.localSurfaceBlocks(x, z, feetY, height)
+      || this.localSurfaceBlocks(x + k, z, feetY, height)
+      || this.localSurfaceBlocks(x - k, z, feetY, height)
+      || this.localSurfaceBlocks(x, z + k, feetY, height)
+      || this.localSurfaceBlocks(x, z - k, feetY, height);
   }
 
   /** Push a vertical cylinder out of every obstacle it overlaps. */
   pushOut(pos, r, feetY, height) {
+    pos.x -= this.ox;
+    pos.z -= this.oz;
+    this.localPushOut(pos, r, feetY, height);
+    pos.x += this.ox;
+    pos.z += this.oz;
+  }
+
+  localPushOut(pos, r, feetY, height) {
     const top = feetY + height;
     for (const c of this.circles) {
       if (!c.enabled || c.y1 < feetY + 0.05 || c.y0 > top) continue;

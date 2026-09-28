@@ -88,8 +88,7 @@ export class Bolt {
     if (Math.random() < dt * 60) {
       this.game.glow.emit({ pos: p, vel: new THREE.Vector3(rand(-0.3, 0.3), rand(-0.3, 0.3), rand(-0.3, 0.3)), life: rand(0.2, 0.4), size: 0.06, color: this.color });
     }
-    const world = this.game.room.world;
-    if (this.life <= 0 || world.surfaceBlocks(p.x, p.z, p.y - 0.1, 0.2) || world.circles.some((c) => c.enabled && c.r > 0.3 && p.y > c.y0 && p.y < c.y1 && Math.hypot(p.x - c.x, p.z - c.z) < c.r)) {
+    if (this.life <= 0 || this.game.room.world.hitsObstacle(p)) {
       return this.dispose(true);
     }
     const player = this.game.player;
@@ -112,7 +111,7 @@ export class Bolt {
         return this.dispose(true);
       }
     } else {
-      for (const e of this.game.room.enemies) {
+      for (const e of this.game.nearbyEnemies()) {
         if (!e.active || this.hit.has(e)) continue;
         if (Math.hypot(e.pos.x - p.x, e.pos.z - p.z) < e.radius + 0.35 && p.y > e.pos.y - 0.2 && p.y < e.pos.y + e.height + 0.2) {
           this.hit.add(e);
@@ -187,8 +186,39 @@ export class Enemy {
     this.dead = false;
     this.removed = false;
     this.barTimer = 0;
+    this.home = new THREE.Vector3(x, y, z);
+    this.elite = false;
+    this.biome = chamber.floor?.biome ?? null;
     this.buildOverlay();
-    chamber.group.add(this.group);
+    (chamber.actors || chamber.group).add(this.group);
+  }
+
+  /** Slumped and still until the knight arrives. */
+  makeDormant() {
+    this.setState('dormant');
+    this.wakeDelay = null;
+    this.rig.position.y = -0.3;
+    this.rig.rotation.x = 0.45;
+    this.vel.set(0, 0, 0);
+  }
+
+  wake(delay = 0) {
+    if (this.state !== 'dormant') return;
+    this.wakeDelay = delay;
+  }
+
+  /** A champion: bigger, tougher, gilded — it gets the boss bar. */
+  makeElite() {
+    this.elite = true;
+    this.name = `${this.name} Champion`;
+    this.maxHp *= 2.4;
+    this.hp = this.maxHp;
+    this.postureMax *= 1.7;
+    this.damageMult *= 1.25;
+    this.rig.scale.multiplyScalar(1.2);
+    this.height *= 1.2;
+    this.radius *= 1.15;
+    this.hudBar = true;
   }
 
   buildOverlay() {
@@ -222,6 +252,7 @@ export class Enemy {
 
   get alive() { return !this.dead; }
   get active() { return !this.dead && this.state !== 'spawning'; }
+  get asleep() { return this.state === 'dormant' || this.state === 'waking'; }
   get player() { return this.game.player; }
 
   setState(s) {
@@ -317,6 +348,17 @@ export class Enemy {
     }
     let mult = 1;
     let result = 'hit';
+    if (this.asleep) {
+      // Caught unawares: a sneak strike lands like a riposte, and they wake at once.
+      mult = 2.2;
+      result = 'riposte';
+      this.takeRawDamage(damage * mult, dir, 4);
+      if (this.dead) return 'kill';
+      this.rig.position.y = 0;
+      this.rig.rotation.x = 0;
+      this.setState('flinch');
+      return result;
+    }
     if (this.state === 'broken') { mult = player.stats.riposteMult * 1.8; result = 'riposte'; }
     else if (this.state === 'stagger') { mult = player.stats.riposteMult; result = 'riposte'; }
     this.takeRawDamage(damage * mult, dir, result === 'riposte' ? 7 : 2.5);
@@ -381,6 +423,7 @@ export class Enemy {
       }));
       this.game.audio.play('shatter');
     }
+    if (this.game.hud.boss === this) this.game.hud.hideBoss();
     this.game.onEnemyKilled(this, fell);
     this.removed = true;
   }
@@ -426,6 +469,40 @@ export class Enemy {
         });
       }
       if (this.dead) return;
+    }
+
+    if (this.state === 'dormant') {
+      this.brake(dt, 20);
+      const ch = this.chamber;
+      if (this.wakeDelay === null && ch.state === 'combat' && this.game.room === ch && this.distToPlayer() < 22) this.wakeDelay = rand(0, 0.3);
+      if (this.wakeDelay !== null) {
+        this.wakeDelay -= dt;
+        if (this.wakeDelay <= 0) {
+          this.setState('waking');
+          this.game.audio.play(this.wakeSound || 'rattle');
+        }
+      }
+      this.updateOverlay(dt);
+      return;
+    }
+    if (this.state === 'waking') {
+      const k = Math.min(1, this.stateTime / 0.7);
+      this.rig.position.y = -0.3 * (1 - easeOut(k));
+      this.rig.rotation.x = 0.45 * (1 - easeOut(k));
+      this.yaw = dampAngle(this.yaw, this.headingToPlayer(), 6, dt);
+      this.group.rotation.y = this.yaw;
+      this.glint = 0.22;
+      if (k >= 1) this.setState('chase');
+      this.updateOverlay(dt);
+      return;
+    }
+    // Leashed to their chamber: if the knight leaves and gets far, they walk home and rest.
+    if (this.game.room !== this.chamber && this.distToPlayer() > 26 && this.state === 'chase') this.setState('return');
+    if (this.elite && Math.random() < dt * 14) {
+      this.game.glow.emit({
+        pos: new THREE.Vector3(this.pos.x + rand(-0.6, 0.6), this.pos.y + rand(0.2, this.height), this.pos.z + rand(-0.6, 0.6)),
+        vel: new THREE.Vector3(0, rand(0.4, 1.2), 0), life: rand(0.6, 1.2), size: 0.05, color: 0xffc050,
+      });
     }
 
     if (!this.updateCommonStates(dt)) {
@@ -493,13 +570,22 @@ export class Enemy {
         this.brake(dt, 6);
         if (this.stateTime > 0.22) this.setState('chase');
         return true;
+      case 'return': {
+        const dx = this.home.x - this.pos.x, dz = this.home.z - this.pos.z;
+        const d = Math.hypot(dx, dz);
+        if (this.game.room === this.chamber && this.distToPlayer() < 18) { this.setState('chase'); return true; }
+        if (d < 1) { this.makeDormant(); return true; }
+        this.steer(dx / d, dz / d, 2.6, dt, 6);
+        this.yaw = dampAngle(this.yaw, Math.atan2(dx, dz), 6, dt);
+        return true;
+      }
     }
     return false;
   }
 
   updateOverlay(dt) {
     this.barTimer -= dt;
-    const showBar = this.barTimer > 0 && !this.isBoss;
+    const showBar = this.barTimer > 0 && !this.isBoss && !this.hudBar;
     const top = this.height + 0.35;
     this.barBg.visible = this.barFill.visible = showBar;
     if (showBar) {
@@ -577,10 +663,12 @@ function buildSkeletonRig(mats, { scale = 1, weapon = 'blade' } = {}) {
 
 export class Skeleton extends Enemy {
   constructor(game, chamber, x, y, z) {
-    super(game, chamber, x, y, z, { name: 'Hollow', hp: 42, radius: 0.45, height: 1.9, blockChance: 0.25, postureMax: 60, parryPosture: 35 });
-    this.eyeMat = new THREE.MeshBasicMaterial({ color: 0xff2a10, fog: false });
+    const biome = chamber.floor?.biome;
+    super(game, chamber, x, y, z, { name: `${biome?.prefix ?? ''} Hollow`.trim(), hp: 42, radius: 0.45, height: 1.9, blockChance: 0.25, postureMax: 60, parryPosture: 35, chunkColor: biome?.bone });
+    this.eyeColor = biome?.eyes ?? 0xff2a10;
+    this.eyeMat = new THREE.MeshBasicMaterial({ color: this.eyeColor, fog: false });
     this.parts = buildSkeletonRig({
-      bone: this.mat(0xc9bfa6),
+      bone: this.mat(biome?.bone ?? 0xc9bfa6),
       weaponMat: this.weaponMat(0x5a5048),
       socket: new THREE.MeshBasicMaterial({ color: 0x050303 }),
       eye: this.eyeMat,
@@ -668,7 +756,7 @@ export class Skeleton extends Enemy {
     P.arms[1].rotation.x = damp(P.arms[1].rotation.x, s * 0.5 - 0.2, 14, dt);
     P.root.rotation.x = damp(P.root.rotation.x, lean, 14, dt);
     P.head.rotation.z = Math.sin(this.game.time * 3 + this.walk) * 0.08;
-    this.eyeMat.color.setHex(this.state === 'windup' ? 0xffe0a0 : 0xff2a10);
+    this.eyeMat.color.setHex(this.state === 'windup' ? 0xffe0a0 : this.eyeColor);
   }
 }
 
@@ -1198,13 +1286,17 @@ export class Warden extends Enemy {
   }
 }
 
-export function pickEnemyType(depth) {
+const SIGNATURES = { knight: () => Brute, drowned: () => Drowned, hound: () => EmberHound, gargoyle: () => Gargoyle };
+
+export function pickEnemyType(depth, biome = null) {
+  const sig = biome ? SIGNATURES[biome.signature]() : Brute;
   const table = [
     [Skeleton, 5],
-    [Shade, depth >= 1 ? 2 + depth * 0.5 : 0],
+    [Shade, 2 + depth * 0.5],
     [Acolyte, 1.2 + depth * 0.5],
-    [Brute, depth >= 2 ? depth * 0.8 : 0.35],
+    [sig, sig === Brute ? (depth >= 2 ? depth * 0.8 : 0.5) : 2 + depth * 0.4],
   ];
+  if (sig !== Brute && depth >= 2) table.push([Brute, 0.4]);
   let r = Math.random() * table.reduce((a, [, w]) => a + w, 0);
   for (const [Type, w] of table) {
     r -= w;
@@ -1213,6 +1305,14 @@ export function pickEnemyType(depth) {
   return Skeleton;
 }
 
+/** An elite arena's occupants: one champion of the biome's signature breed and its retinue. */
+export function eliteGroup(biome, depth) {
+  const Champion = SIGNATURES[biome.elite]();
+  const group = [{ Type: Champion, elite: true }];
+  const retinue = Champion === EmberHound ? [EmberHound, EmberHound] : [Skeleton, pickEnemyType(depth, biome)];
+  for (const Type of retinue) group.push({ Type, elite: false });
+  return group;
+}
 
 // ============================================================================
 // Training dummy — never fights back, never dies, resets when left alone.
@@ -1304,5 +1404,368 @@ export const ENEMY_TYPES = {
   shade: { name: 'Shade', create: (g, a, x, y, z) => new Shade(g, a, x, y, z) },
   acolyte: { name: 'Lumen Acolyte', create: (g, a, x, y, z) => new Acolyte(g, a, x, y, z) },
   knight: { name: 'Geode Knight', create: (g, a, x, y, z) => new Brute(g, a, x, y, z) },
+  hound: { name: 'Ember Hound', create: (g, a, x, y, z) => new EmberHound(g, a, x, y, z) },
+  drowned: { name: 'Drowned', create: (g, a, x, y, z) => new Drowned(g, a, x, y, z) },
+  gargoyle: { name: 'Gargoyle', create: (g, a, x, y, z) => new Gargoyle(g, a, x, y, z) },
   warden: { name: 'Guardian', create: (g, a, x, y, z) => new Warden(g, a, x, y, z, 'Sparring Guardian') },
 };
+
+// ============================================================================
+// Ember Hound — a fast, low, burning pack hunter that pounces
+// ============================================================================
+
+export class EmberHound extends Enemy {
+  constructor(game, chamber, x, y, z) {
+    super(game, chamber, x, y, z, { name: 'Ember Hound', hp: 34, radius: 0.5, height: 1.2, mass: 0.8, chunkColor: 0x2a1a14, postureMax: 40, parryPosture: 40 });
+    const hide = this.mat(0x2a1e1a);
+    const bone = this.mat(0x4a3a30);
+    this.emberMat = new THREE.MeshBasicMaterial({ color: 0xff7a20, fog: false });
+    this.body = new THREE.Group();
+    this.body.add(box(0.5, 0.42, 1.1, hide, 0, 0.78, 0));
+    this.body.add(box(0.4, 0.3, 0.5, hide, 0, 0.92, -0.3));
+    for (let i = 0; i < 4; i++) this.body.add(box(0.06, 0.04, 0.5, this.emberMat, rand(-0.18, 0.18), 1.0, rand(-0.4, 0.4)));
+    this.head = new THREE.Group();
+    this.head.position.set(0, 0.95, 0.6);
+    this.head.add(box(0.36, 0.3, 0.45, hide, 0, 0, 0.1));
+    this.jaw = box(0.3, 0.08, 0.36, bone, 0, -0.18, 0.14);
+    this.head.add(this.jaw);
+    for (const s of [-1, 1]) {
+      this.head.add(box(0.06, 0.04, 0.02, this.emberMat, s * 0.1, 0.05, 0.33));
+      const ear = box(0.06, 0.18, 0.06, hide, s * 0.12, 0.2, -0.05);
+      ear.rotation.z = s * -0.3;
+      this.head.add(ear);
+    }
+    this.body.add(this.head);
+    const tail = box(0.08, 0.08, 0.6, hide, 0, 0.9, -0.8);
+    tail.rotation.x = 0.4;
+    this.body.add(tail);
+    this.legs = [];
+    for (const [lx, lz] of [[-0.2, 0.38], [0.2, 0.38], [-0.2, -0.38], [0.2, -0.38]]) {
+      const leg = new THREE.Group();
+      leg.position.set(lx, 0.6, lz);
+      leg.add(box(0.12, 0.6, 0.14, hide, 0, -0.3, 0));
+      this.body.add(leg);
+      this.legs.push(leg);
+    }
+    const blade = this.weaponMat(0x3a2a22);
+    this.jaw.material = blade;
+    this.rig.add(this.body);
+    this.speed = 6 * this.speedMult;
+    this.orbitDir = chance(0.5) ? 1 : -1;
+    this.cooldown = rand(0.8, 1.8);
+    this.gallop = rand(0, TAU);
+    this.wakeSound = 'growl';
+  }
+
+  onFlinch() { this.setState('flinch'); }
+
+  think(dt) {
+    this.cooldown -= dt;
+    const d = this.distToPlayer();
+    switch (this.state) {
+      case 'chase':
+        if (d > 5) this.chase(dt, this.speed);
+        else this.strafe(dt, 3.4, this.orbitDir);
+        if (this.cooldown <= 0 && d < 6.5) {
+          this.bites = this.game.depth >= 2 && chance(0.4) ? 2 : 1;
+          this.beginWindup(0.45);
+          this.game.audio.play('growl');
+        }
+        break;
+      case 'windup':
+        this.brake(dt, 12);
+        this.facePlayer(dt, 10);
+        if (this.stateTime >= this.windupTime) {
+          this.setState('pounce');
+          this.struck = false;
+          this.pounceDir = this.forward().clone();
+        }
+        break;
+      case 'pounce':
+        this.vel.set(this.pounceDir.x * 12, 0, this.pounceDir.z * 12);
+        if (!this.struck && d < this.radius + this.player.radius + 0.7) {
+          this.struck = true;
+          this.attackPlayer({ damage: 13, range: 1.6, arc: 2 });
+          if (this.state !== 'pounce') break;
+        }
+        if (this.stateTime > 0.34) {
+          if (--this.bites > 0 && this.state === 'pounce') this.beginWindup(0.28);
+          else this.setState('recover');
+        }
+        break;
+      case 'recover':
+        this.brake(dt, 6);
+        if (this.stateTime > 0.6) {
+          this.cooldown = rand(1, 2.2);
+          if (chance(0.4)) this.orbitDir *= -1;
+          this.setState('chase');
+        }
+        break;
+    }
+  }
+
+  animate(dt) {
+    const speedN = Math.min(1, Math.hypot(this.vel.x, this.vel.z) / 6);
+    this.gallop += dt * 16 * speedN;
+    const s = Math.sin(this.gallop) * 0.7 * speedN;
+    this.legs[0].rotation.x = s; this.legs[1].rotation.x = s * 0.8;
+    this.legs[2].rotation.x = -s; this.legs[3].rotation.x = -s * 0.8;
+    const crouch = this.state === 'windup' ? -0.25 : 0;
+    const hop = this.state === 'pounce' ? Math.sin(Math.min(1, this.stateTime / 0.34) * Math.PI) * 0.6 : 0;
+    this.body.position.y = damp(this.body.position.y, crouch + hop, 20, dt);
+    this.body.rotation.x = this.state === 'stagger' || this.state === 'broken' ? -0.35 : this.state === 'pounce' ? -0.15 : 0;
+    this.jaw.rotation.x = this.state === 'pounce' || this.state === 'windup' ? 0.5 : 0.1;
+    if (Math.random() < dt * 10) {
+      this.game.glow.emit({
+        pos: new THREE.Vector3(this.pos.x + rand(-0.3, 0.3), this.pos.y + rand(0.6, 1.1), this.pos.z + rand(-0.3, 0.3)),
+        vel: new THREE.Vector3(rand(-0.2, 0.2), rand(0.6, 1.4), rand(-0.2, 0.2)), life: rand(0.4, 0.8), size: 0.04, color: 0xff7a20,
+      });
+    }
+  }
+}
+
+// ============================================================================
+// Drowned — a bloated, waterlogged giant: a crushing slam and a perilous grab
+// ============================================================================
+
+export class Drowned extends Enemy {
+  constructor(game, chamber, x, y, z) {
+    super(game, chamber, x, y, z, {
+      name: 'Drowned', hp: 120, radius: 0.75, height: 2.5, mass: 3, chunkColor: 0x5a6a5a,
+      postureMax: 110, parryPosture: 34, interruptOnParry: false, brokenTime: 2.4,
+    });
+    const flesh = this.mat(0x6a7a6a);
+    const dark = this.mat(0x2e3a30);
+    const weed = this.mat(0x2a4a2a);
+    this.eyeMat = new THREE.MeshBasicMaterial({ color: this.biome?.eyes ?? 0x9affc8, fog: false });
+    const r = new THREE.Group();
+    this.legs = [];
+    for (const side of [-1, 1]) {
+      const leg = new THREE.Group();
+      leg.position.set(side * 0.3, 0.8, 0);
+      leg.add(box(0.34, 0.8, 0.36, dark, 0, -0.4, 0));
+      r.add(leg);
+      this.legs.push(leg);
+    }
+    const belly = new THREE.Mesh(new THREE.IcosahedronGeometry(0.75, 1), flesh);
+    belly.scale.set(1, 1.05, 0.85);
+    belly.position.y = 1.45;
+    belly.castShadow = true;
+    r.add(belly);
+    const head = box(0.4, 0.38, 0.38, flesh, 0, 2.2, 0.25);
+    r.add(head);
+    for (const s of [-1, 1]) {
+      const e = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.04, 0.02), this.eyeMat);
+      e.position.set(s * 0.09, 2.24, 0.45);
+      r.add(e);
+    }
+    for (let i = 0; i < 7; i++) {
+      const h = rand(0.5, 1.4);
+      r.add(box(0.05, h, 0.05, weed, rand(-0.6, 0.6), 1.9 - h / 2, rand(-0.5, 0.5)));
+    }
+    this.arms = [];
+    const claw = this.weaponMat(0x3a4438);
+    for (const side of [-1, 1]) {
+      const arm = new THREE.Group();
+      arm.rotation.order = 'YXZ';
+      arm.position.set(side * 0.78, 1.95, 0.1);
+      arm.add(box(0.26, 1.5, 0.26, flesh, 0, -0.72, 0));
+      arm.add(box(0.36, 0.3, 0.4, claw, 0, -1.55, 0.05));
+      r.add(arm);
+      this.arms.push(arm);
+    }
+    this.rig.add(r);
+    this.root = r;
+    this.speed = 2.1 * this.speedMult;
+    this.cooldown = 1.2;
+    this.walk = 0;
+    this.wakeSound = 'groan';
+  }
+
+  think(dt) {
+    this.cooldown -= dt;
+    const d = this.distToPlayer();
+    switch (this.state) {
+      case 'chase':
+        this.chase(dt, this.speed, 2.4);
+        if (this.cooldown <= 0 && d < 3.4) {
+          this.attack = chance(0.35) ? 'grab' : 'slam';
+          this.beginWindup(this.attack === 'grab' ? 0.75 : 0.95, { perilous: this.attack === 'grab' });
+          this.game.audio.play('groan');
+        }
+        break;
+      case 'windup':
+        this.brake(dt, 10);
+        this.facePlayer(dt, this.attack === 'grab' ? 5 : 3);
+        if (this.stateTime >= this.windupTime) {
+          this.setState('strike');
+          this.struck = false;
+        }
+        break;
+      case 'strike': {
+        const f = this.forward();
+        const lunge = this.attack === 'grab' ? 7 : 1.5;
+        this.vel.set(f.x * lunge, 0, f.z * lunge);
+        if (!this.struck && this.stateTime > 0.1) {
+          this.struck = true;
+          if (this.attack === 'grab') this.attackPlayer({ damage: 30, range: 2.4, arc: 1.1, perilous: true });
+          else {
+            this.attackPlayer({ damage: 26, range: 3.0, arc: 1.6 });
+            this.game.audio.play('boss-slam');
+            this.game.shake(0.3);
+          }
+        }
+        if (this.stateTime > 0.35) this.setState('recover');
+        break;
+      }
+      case 'recover':
+        this.brake(dt, 8);
+        if (this.stateTime > 1.0) {
+          this.cooldown = rand(0.8, 1.8);
+          this.setState('chase');
+        }
+        break;
+    }
+  }
+
+  animate(dt) {
+    const speedN = Math.min(1, Math.hypot(this.vel.x, this.vel.z) / 2);
+    this.walk += dt * 5 * speedN;
+    const s = Math.sin(this.walk) * 0.45 * speedN;
+    this.legs[0].rotation.x = s;
+    this.legs[1].rotation.x = -s;
+    let ax = -0.2 + s * 0.3, lean = 0.1 + Math.sin(this.game.time * 1.3) * 0.04;
+    if (this.state === 'windup') { ax = this.attack === 'grab' ? -1.5 : -2.8; lean = -0.2; }
+    else if (this.state === 'strike') { ax = this.attack === 'grab' ? -1.6 : -0.6; lean = 0.35; }
+    else if (this.state === 'broken' || this.state === 'stagger') { ax = 0.3; lean = -0.35; }
+    const r = this.state === 'strike' ? 30 : 8;
+    for (const a of this.arms) a.rotation.x = damp(a.rotation.x, ax, r, dt);
+    this.root.rotation.x = damp(this.root.rotation.x, lean, 8, dt);
+    this.eyeMat.color.setHex(this.state === 'windup' ? 0xffffff : this.biome?.eyes ?? 0x9affc8);
+  }
+}
+
+// ============================================================================
+// Gargoyle — stone that flies: hovers, rises, and dives
+// ============================================================================
+
+export class Gargoyle extends Enemy {
+  constructor(game, chamber, x, y, z) {
+    super(game, chamber, x, y, z, { name: 'Gargoyle', hp: 55, radius: 0.6, height: 2.2, mass: 1.5, chunkColor: 0x8a8478, postureMax: 60, parryPosture: 35 });
+    const stone = this.mat(0x8a8478);
+    const dark = this.mat(0x5a564e);
+    this.eyeMat = new THREE.MeshBasicMaterial({ color: this.biome?.eyes ?? 0xff4a20, fog: false });
+    this.body = new THREE.Group();
+    const torso = box(0.6, 0.8, 0.5, stone, 0, 1.2, 0);
+    torso.rotation.x = 0.3;
+    this.body.add(torso);
+    const head = new THREE.Group();
+    head.position.set(0, 1.7, 0.3);
+    head.add(box(0.36, 0.32, 0.4, stone, 0, 0, 0));
+    for (const s of [-1, 1]) {
+      const horn = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.35, 4), dark);
+      horn.position.set(s * 0.14, 0.25, -0.05);
+      horn.rotation.x = -0.6;
+      head.add(horn);
+      const e = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.04, 0.02), this.eyeMat);
+      e.position.set(s * 0.08, 0.02, 0.21);
+      head.add(e);
+    }
+    this.body.add(head);
+    this.wings = [];
+    for (const s of [-1, 1]) {
+      const wing = new THREE.Group();
+      wing.position.set(s * 0.25, 1.5, -0.2);
+      const shape = new THREE.Shape();
+      shape.moveTo(0, 0);
+      shape.lineTo(s * 1.5, 0.5);
+      shape.lineTo(s * 1.3, -0.4);
+      shape.lineTo(s * 0.8, -0.2);
+      shape.lineTo(s * 0.5, -0.6);
+      shape.lineTo(0, 0);
+      const m = new THREE.Mesh(new THREE.ShapeGeometry(shape), new THREE.MeshStandardMaterial({ color: 0x6a665c, roughness: 0.9, side: THREE.DoubleSide, flatShading: true }));
+      m.castShadow = true;
+      wing.add(m);
+      this.body.add(wing);
+      this.wings.push(wing);
+    }
+    const claws = this.weaponMat(0x4a463e);
+    for (const s of [-1, 1]) this.body.add(box(0.1, 0.6, 0.1, claws, s * 0.35, 0.9, 0.3));
+    for (const s of [-1, 1]) this.body.add(box(0.14, 0.5, 0.16, dark, s * 0.18, 0.55, 0));
+    const tail = box(0.08, 0.08, 0.8, dark, 0, 0.8, -0.5);
+    tail.rotation.x = 0.5;
+    this.body.add(tail);
+    this.rig.add(this.body);
+    this.speed = 4.4 * this.speedMult;
+    this.orbitDir = chance(0.5) ? 1 : -1;
+    this.cooldown = rand(1, 2);
+    this.hover = 1.4;
+    this.wakeSound = 'screech';
+  }
+
+  onFlinch() {
+    if (this.state === 'windup') this.setState('chase');
+  }
+
+  think(dt) {
+    this.cooldown -= dt;
+    const d = this.distToPlayer();
+    switch (this.state) {
+      case 'chase':
+        if (d > 7) this.chase(dt, this.speed);
+        else if (d < 4.5) {
+          const p = this.player.pos;
+          this.steer((this.pos.x - p.x) / (d || 1), (this.pos.z - p.z) / (d || 1), this.speed * 0.7, dt, 5);
+          this.facePlayer(dt, 8);
+        } else this.strafe(dt, 2.6, this.orbitDir);
+        this.hover = damp(this.hover, 1.4, 3, dt);
+        if (this.cooldown <= 0 && d < 9) {
+          this.beginWindup(0.6);
+          this.game.audio.play('screech');
+        }
+        break;
+      case 'windup':
+        this.brake(dt, 8);
+        this.facePlayer(dt, 12);
+        this.hover = damp(this.hover, 2.8, 6, dt);
+        if (this.stateTime >= this.windupTime) {
+          this.diveDir = this.forward().clone();
+          this.struck = false;
+          this.setState('dive');
+        }
+        break;
+      case 'dive':
+        this.vel.set(this.diveDir.x * 15, 0, this.diveDir.z * 15);
+        this.hover = damp(this.hover, 0.4, 10, dt);
+        if (!this.struck && d < this.radius + this.player.radius + 0.8) {
+          this.struck = true;
+          this.attackPlayer({ damage: 16, range: 1.8, arc: 2.2 });
+          if (this.state !== 'dive') break;
+        }
+        if (this.stateTime > 0.45) this.setState('recover');
+        break;
+      case 'recover':
+        this.brake(dt, 5);
+        this.hover = damp(this.hover, 0, 6, dt);
+        if (this.stateTime > 0.9) {
+          this.cooldown = rand(1.2, 2.4);
+          if (chance(0.5)) this.orbitDir *= -1;
+          this.setState('chase');
+        }
+        break;
+      default:
+        this.hover = damp(this.hover, 0, 6, dt);
+    }
+  }
+
+  animate(dt) {
+    const t = this.game.time;
+    const flying = this.hover > 0.3;
+    const flap = flying ? Math.sin(t * (this.state === 'windup' ? 22 : 12)) * 0.6 : 0.9;
+    this.wings[0].rotation.y = flap;
+    this.wings[1].rotation.y = -flap;
+    this.body.position.y = this.hover + (flying ? Math.sin(t * 3) * 0.12 : 0);
+    this.body.rotation.x = this.state === 'dive' ? 0.6 : this.state === 'stagger' || this.state === 'broken' ? -0.4 : 0;
+    this.eyeMat.color.setHex(this.state === 'windup' ? 0xffffff : this.biome?.eyes ?? 0xff4a20);
+  }
+}

@@ -15,6 +15,7 @@ const GEO = {
   cone6: new THREE.ConeGeometry(1, 1, 6),
   cone7: new THREE.ConeGeometry(1, 1, 7),
   rock: new THREE.DodecahedronGeometry(1, 0),
+  ico: new THREE.IcosahedronGeometry(1, 1),
   cube: new THREE.BoxGeometry(1, 1, 1),
 };
 
@@ -34,6 +35,8 @@ export class Builder {
     this.emitters = [];
     this.spots = [];
     this.shafts = [];
+    this.grass = [];
+    this.biome = chamber.floor?.biome ?? { id: 'crystal' };
   }
 
   add(geo, mat, matrix, opts) { this.batch.add(geo, mat, matrix, opts); }
@@ -227,7 +230,16 @@ export class Builder {
     this.add(geo, this.M.brick, composeMatrix((ax + bx) / 2, bottomY, (az + bz) / 2, 0, ang + Math.PI / 2));
   }
 
-  crystalCluster(x, z, y, scale = 1, { light = true, collide = true, tilt = 0.5, count = randInt(3, 7) } = {}) {
+  /** The biome's signature growth: crystals, glowing fungus, or wild overgrowth. */
+  crystalCluster(x, z, y, scale = 1, opts = {}) {
+    switch (this.biome.id) {
+      case 'sunken': return this.fungus(x, z, y, scale, opts);
+      case 'sunlit': return y < -3 ? this.rockSpire(x, z, y, scale) : this.overgrowth(x, z, y, scale, opts);
+      default: return this.crystals(x, z, y, scale, opts);
+    }
+  }
+
+  crystals(x, z, y, scale = 1, { light = true, collide = true, tilt = 0.5, count = randInt(3, 7) } = {}) {
     const M = this.M;
     for (let i = 0; i < count; i++) {
       const len = scale * rand(0.6, 1.6) * (i === 0 ? 1.35 : 1);
@@ -381,29 +393,172 @@ export class Builder {
 
   // ---- The endless cathedral-cavern beyond the chamber -----------------------
 
-  vista() {
-    const count = randInt(22, 32);
-    for (let i = 0; i < count; i++) {
-      const a = rand(0, TAU), r = rand(36, 90);
-      const w = rand(3, 8);
-      this.tower(Math.cos(a) * r, Math.sin(a) * r, -80, rand(-12, 28), w, { windowChance: 0.35 });
+  fungus(x, z, y, scale = 1, { light = true, collide = true } = {}) {
+    const M = this.M;
+    for (let i = 0; i < randInt(3, 7); i++) {
+      const h = scale * rand(0.3, 1.6) * (i === 0 ? 1.4 : 1);
+      const cx = x + (i ? rand(-0.7, 0.7) * scale : 0), cz = z + (i ? rand(-0.7, 0.7) * scale : 0);
+      const lean = rand(-0.25, 0.25);
+      this.add(GEO.cyl6, M.bone, composeMatrix(cx, y + h / 2, cz, lean, 0, lean, 0.06 * scale + 0.04, h, 0.06 * scale + 0.04), { cast: false });
+      const cap = scale * rand(0.22, 0.55) * (i === 0 ? 1.5 : 1);
+      this.add(GEO.cone7, M.crystal, composeMatrix(cx + lean * h * 0.5, y + h, cz + lean * h * 0.5, Math.PI, 0, 0, cap, cap * 0.45, cap), { cast: false, receive: false });
     }
-    for (let i = 0; i < randInt(10, 16); i++) {
-      const a = rand(0, TAU), r = rand(30, 75);
-      this.crystalCluster(Math.cos(a) * r, Math.sin(a) * r, rand(-35, -2), rand(2.5, 7), { light: false, collide: false, count: randInt(4, 8) });
+    for (let i = 0; i < 3; i++) this.moss(x + rand(-1, 1) * scale, z + rand(-1, 1) * scale, y, rand(0.5, 1.1) * scale);
+    if (collide) this.world.addCircle(x, z, 0.35 * scale + 0.2, y - 1, y + 2 * scale);
+    this.reserve(x, z, 0.6 * scale + 0.2);
+    if (light) this.lightSpots.push({ kind: 'crystal', pos: new THREE.Vector3(x, y + 1.3 * scale, z), weight: scale * 0.8 });
+  }
+
+  overgrowth(x, z, y, scale = 1, { collide = true } = {}) {
+    const M = this.M;
+    if (scale > 1.3 && chance(0.6)) this.tree(x, z, y, scale * 0.8, chance(0.15));
+    else {
+      for (let i = 0; i < randInt(2, 4); i++) {
+        const s = scale * rand(0.5, 1.0);
+        this.add(GEO.ico, pick(M.leaf), composeMatrix(x + rand(-0.6, 0.6) * scale, y + s * 0.45, z + rand(-0.6, 0.6) * scale, rand(0, 3), rand(0, 3), 0, s, s * 0.7, s));
+      }
+      if (collide) this.world.addCircle(x, z, 0.5 * scale + 0.2, y - 1, y + 1.5 * scale);
     }
-    // Great bridges linking far-off towers.
+    for (let i = 0; i < 6; i++) this.grass.push({ x: x + rand(-1.8, 1.8) * scale, y, z: z + rand(-1.8, 1.8) * scale });
+    this.reserve(x, z, 0.7 * scale + 0.2);
+  }
+
+  rockSpire(x, z, y, scale) {
+    const h = scale * rand(4, 9);
+    this.add(GEO.rock, this.M.rock, composeMatrix(x, y + h / 2, z, rand(0, 0.3), rand(0, 3), rand(0, 0.3), scale * 1.5, h, scale * 1.3), { cast: false });
+  }
+
+  moss(x, z, y, r) {
+    const g = new THREE.CircleGeometry(r, 7).rotateX(-Math.PI / 2);
+    this.add(g, this.M.moss, composeMatrix(x, y + 0.015, z, 0, rand(0, TAU), 0, rand(0.7, 1.3), 1, 1), { cast: false, receive: true });
+  }
+
+  /** Tree with a bent trunk, forking branches and leafy clumps (or bare twigs). */
+  tree(x, z, y, scale = 1, dead = false) {
+    const M = this.M;
+    const link = (ax, ay, az, bx, by, bz, r0, r1, mat) => {
+      const len = Math.hypot(bx - ax, by - ay, bz - az);
+      const m = new THREE.Matrix4().lookAt(new THREE.Vector3(ax, ay, az), new THREE.Vector3(bx, by, bz), new THREE.Vector3(0, 1, 0.001));
+      const geo = new THREE.CylinderGeometry(r0, r1, len, 5).rotateX(Math.PI / 2).translate(0, 0, -len / 2);
+      this.add(geo, mat, new THREE.Matrix4().makeTranslation(ax, ay, az).multiply(m));
+    };
+    let px = x, py = y - 0.2, pz = z, r = 0.3 * scale;
+    let lean = rand(0, TAU);
+    for (let i = 0; i < 3; i++) {
+      const h = rand(1, 1.6) * scale, t = rand(0.1, 0.35);
+      const nx = px + Math.cos(lean) * Math.sin(t) * h, nz = pz + Math.sin(lean) * Math.sin(t) * h, ny = py + h;
+      link(px, py, pz, nx, ny, nz, r, r * 0.78, M.bark);
+      px = nx; py = ny; pz = nz; r *= 0.78;
+      lean += rand(-0.9, 0.9);
+    }
     for (let i = 0; i < randInt(3, 6); i++) {
-      const a = rand(0, TAU), r = rand(45, 80), len = rand(18, 40), ang = rand(0, TAU);
-      const cx = Math.cos(a) * r, cz = Math.sin(a) * r, y = rand(-8, 12);
-      const h = rand(6, 10);
-      const spans = Math.max(2, Math.round(len / 8));
-      const arcs = [];
-      for (let s = 0; s < spans; s++) arcs.push({ cx: -len / 2 + (len / spans) * (s + 0.5), halfW: len / spans / 2 - 0.8, spring: h * 0.4, peak: h * 0.9 });
-      this.add(archWallGeometry(len, h, 2.5, arcs), this.M.brick, composeMatrix(cx, y - h, cz, 0, ang), { cast: false, receive: true });
-      this.add(worldBoxGeometry(len, 0.6, 3), this.M.trim, composeMatrix(cx, y + 0.3, cz, 0, ang), { cast: false, receive: true });
+      const a = rand(0, TAU), bl = rand(1.2, 2.4) * scale;
+      const ex = px + Math.cos(a) * bl, ey = py + rand(0.2, 1) * bl * 0.8, ez = pz + Math.sin(a) * bl;
+      link(px, py - rand(0, 0.5), pz, ex, ey, ez, r * 0.7, r * 0.3, M.bark);
+      if (dead) link(ex, ey, ez, ex + rand(-0.8, 0.8), ey + rand(0.3, 0.9), ez + rand(-0.8, 0.8), r * 0.3, 0.02, M.bark);
+      else for (let j = 0; j < 2; j++) {
+        const sz = rand(0.9, 1.7) * scale;
+        this.add(GEO.ico, pick(M.leaf), composeMatrix(ex + rand(-0.5, 0.5), ey + rand(-0.2, 0.5), ez + rand(-0.5, 0.5), rand(0, 3), rand(0, 3), 0, sz, sz * 0.72, sz));
+      }
     }
-    this.stalactites(randInt(30, 50), 0, 0, 85, 26, 40, 6, 20);
+    this.world.addCircle(x, z, 0.4 * scale, y - 1, y + 4 * scale);
+    this.reserve(x, z, 0.6 * scale);
+  }
+
+  /** Thick roots crawling over a platform's rim. */
+  roots(x, z, y) {
+    const a0 = rand(0, TAU);
+    for (let i = 0; i < randInt(2, 4); i++) {
+      const a = a0 + rand(-0.7, 0.7), len = rand(1.5, 3.5), r = rand(0.08, 0.2);
+      const m = composeMatrix(x + Math.cos(a) * len * 0.4, y + r * 0.5, z + Math.sin(a) * len * 0.4, 0, -a, Math.PI / 2 + rand(-0.15, 0.15), r, len, r);
+      this.add(GEO.cyl6, this.M.bark, m, { cast: true });
+    }
+  }
+
+  vines(x, z, yTop, yBottom) {
+    for (let i = 0; i < randInt(2, 4); i++) {
+      const len = rand(0.5, 1) * (yTop - yBottom);
+      this.add(GEO.cube, this.M.moss, composeMatrix(x + rand(-0.4, 0.4), yTop - len / 2, z + rand(-0.4, 0.4), 0, rand(0, 3), 0, 0.05, len, 0.2), { cast: false });
+    }
+  }
+
+  /** Glowing fissure across a floor. */
+  lavaCrack(x, z, y) {
+    let a = rand(0, TAU), px = x, pz = z;
+    for (let i = 0; i < randInt(3, 6); i++) {
+      const len = rand(0.6, 1.4);
+      const nx = px + Math.cos(a) * len, nz = pz + Math.sin(a) * len;
+      this.add(GEO.cube, this.M.lava, composeMatrix((px + nx) / 2, y + 0.01, (pz + nz) / 2, 0, -a, 0, len + 0.05, 0.03, rand(0.06, 0.14)), { cast: false, receive: false });
+      px = nx; pz = nz;
+      a += rand(-0.8, 0.8);
+    }
+  }
+
+  spikes(x, z, y) {
+    for (let i = 0; i < randInt(3, 6); i++) {
+      const h = rand(0.5, 1.4);
+      this.add(GEO.cone4, this.M.iron, composeMatrix(x + rand(-0.5, 0.5), y + h / 2, z + rand(-0.5, 0.5), rand(-0.3, 0.3), rand(0, 3), rand(-0.3, 0.3), 0.08, h, 0.08));
+    }
+    this.world.addCircle(x, z, 0.7, y - 1, y + 1.2);
+    this.reserve(x, z, 0.9);
+  }
+
+  rubble(x, z, y, r = 1) {
+    for (let i = 0; i < randInt(3, 7); i++) {
+      const s = rand(0.12, 0.35) * r;
+      this.add(GEO.rock, this.M.rock, composeMatrix(x + rand(-r, r), y + s * 0.4, z + rand(-r, r), rand(0, 3), rand(0, 3), 0, s * rand(1, 1.6), s * 0.7, s));
+    }
+  }
+
+  /** Freestanding gothic arch framing a walkway. */
+  archway(x, z, y, ang, w = 4, h = 5.5) {
+    const geo = archWallGeometry(w + 1.4, h, 0.8, [{ cx: 0, halfW: w / 2, spring: h * 0.5, peak: h * 0.88 }]);
+    this.add(geo, this.M.brick, composeMatrix(x, y, z, 0, ang));
+    for (const s of [-1, 1]) this.world.addCircle(x + Math.cos(ang) * s * (w / 2 + 0.35), z - Math.sin(ang) * s * (w / 2 + 0.35), 0.45, y - 1, y + h);
+  }
+
+  // ---- The endless cathedral-cavern beyond the floor -------------------------
+
+  /** Background scenery for a whole floor, ringing its bounds; style depends on the biome. */
+  vista(cx, cz, inner, outer) {
+    const id = this.biome.id;
+    const M = this.M;
+    const ring = (count, fn) => {
+      for (let i = 0; i < count; i++) {
+        const a = rand(0, TAU), r = rand(inner, outer);
+        fn(cx + Math.cos(a) * r, cz + Math.sin(a) * r, i);
+      }
+    };
+    if (id === 'crystal' || id === 'ember') {
+      ring(randInt(40, 60), (x, z) => this.tower(x, z, -80, rand(-12, 30), rand(3, 9), { windowChance: 0.35 }));
+      ring(randInt(14, 22), (x, z) => this.crystals(x, z, rand(-35, -2), rand(2.5, 7), { light: false, collide: false, count: randInt(4, 8) }));
+      if (id === 'ember') {
+        ring(randInt(8, 14), (x, z) => this.add(GEO.cube, M.lava, composeMatrix(x, -30, z, 0, rand(0, 3), 0, rand(1.5, 4), 60, rand(0.4, 1.2)), { cast: false, receive: false }));
+        ring(randInt(10, 16), (x, z) => this.chain(x, z, 30, rand(0, 15)));
+      }
+    } else if (id === 'sunken') {
+      ring(randInt(30, 45), (x, z) => {
+        const top = rand(-4, 18);
+        this.tower(x, z, -20, top, rand(3, 7), { windowChance: 0.15, roof: chance(0.6) ? 'spire' : 'crown' });
+        if (chance(0.3)) this.tree(x + rand(-3, 3), z + rand(-3, 3), -0.6, rand(1.2, 2), true);
+      });
+      ring(randInt(8, 12), (x, z) => {
+        const len = rand(12, 26), h = rand(8, 14), ang = rand(0, TAU);
+        const spans = Math.max(2, Math.round(len / 7));
+        const arcs = [];
+        for (let s = 0; s < spans; s++) arcs.push({ cx: -len / 2 + (len / spans) * (s + 0.5), halfW: len / spans / 2 - 0.7, spring: h * 0.45, peak: h * 0.9 });
+        this.add(archWallGeometry(len, h, 1.6, arcs), M.brick, composeMatrix(x, -2, z, 0, ang), { cast: false });
+      });
+      ring(randInt(20, 30), (x, z) => this.tree(x, z, -0.6, rand(0.8, 1.6), chance(0.7)));
+    } else {
+      ring(randInt(26, 40), (x, z) => {
+        const h = rand(10, 40), w = rand(6, 16);
+        this.add(GEO.rock, M.rock, composeMatrix(x, -30 + h / 2, z, rand(0, 0.2), rand(0, 3), rand(0, 0.2), w, h + 30, w * rand(0.7, 1.2)), { cast: false });
+        if (chance(0.6)) this.add(GEO.ico, pick(M.leaf), composeMatrix(x, h - 30 + (h + 30) / 2 - 1, z, 0, rand(0, 3), 0, w * 0.8, 2, w * 0.7), { cast: false });
+        if (chance(0.35)) this.tower(x, z, h - 12, h + rand(4, 14), rand(3, 5), { windowChance: 0.1, roof: 'crown' });
+      });
+    }
+    if (id !== 'sunlit') this.stalactites(randInt(60, 90), cx, cz, outer, 26, 40, 6, 20);
   }
 
   // ---- Balustrades grown along every open edge -------------------------------

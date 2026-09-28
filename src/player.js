@@ -316,7 +316,7 @@ export class Player {
   checkHits(override = null) {
     const w = override || this.weapon;
     const reach = w.reach * this.stats.reach;
-    for (const e of this.game.room.enemies) {
+    for (const e of this.game.nearbyEnemies()) {
       if (!e.active || this.hitSet.has(e)) continue;
       const dx = e.pos.x - this.pos.x, dz = e.pos.z - this.pos.z;
       const dy = e.pos.y - this.pos.y;
@@ -373,7 +373,7 @@ export class Player {
             this.skillFired = true;
             this.game.audio.play('bash');
           }
-          for (const e of this.game.room.enemies) {
+          for (const e of this.game.nearbyEnemies()) {
             if (!e.active || this.hitSet.has(e)) continue;
             const dx = e.pos.x - this.pos.x, dz = e.pos.z - this.pos.z;
             const d = Math.hypot(dx, dz);
@@ -487,7 +487,8 @@ export class Player {
     const moving = strafe !== 0 || fwdAxis !== 0;
     const mult = { idle: 1, guard: 0.5, attack: 0.3, recoil: 0.3, guardbreak: 0.15, hurt: 0.4, dead: 0, skill: 0.4, drink: 0.35, swap: 0.8 }[this.state];
     this.sprinting = this.state === 'idle' && fwdAxis > 0 && input.down('ShiftLeft', 'ShiftRight') && this.stamina > 0 && this.grounded;
-    const speed = (this.sprinting ? S.speed * (P.sprintSpeed / P.speed) : S.speed) * mult;
+    const wading = this.grounded && this.pos.y < -0.3 && this.game.mode === 'run';
+    const speed = (this.sprinting ? S.speed * (P.sprintSpeed / P.speed) : S.speed) * mult * (wading ? 0.62 : 1);
     if (this.sprinting) {
       this.stamina = Math.max(0, this.stamina - P.sprintCost * dt);
       this.staminaDelay = 0.3;
@@ -531,7 +532,18 @@ export class Player {
       this.pos.y = newY;
       this.grounded = false;
     }
-    if (this.pos.y < -16 && this.alive) this.game.onPlayerFell();
+    if (this.pos.y < (this.game.fallY ?? -16) && this.alive) this.game.onPlayerFell();
+    // Remember solid footing well away from any edge, to climb back to after a fall.
+    this.safeTimer = (this.safeTimer || 0) - dt;
+    if (this.grounded && this.alive && this.safeTimer <= 0) {
+      this.safeTimer = 0.4;
+      const w = world, y = this.pos.y;
+      const solid = [[1, 0], [-1, 0], [0, 1], [0, -1]].every(([ox, oz]) => {
+        const g = w.groundAt(this.pos.x + ox, this.pos.z + oz, y);
+        return g !== null && Math.abs(g - y) < 0.6;
+      });
+      if (solid) this.lastSafe = { x: this.pos.x, y, z: this.pos.z };
+    }
 
     const hs = Math.hypot(this.vel.x, this.vel.z);
     if (this.grounded && moving && hs > 0.5) {
@@ -539,7 +551,7 @@ export class Player {
       this.bobPhase += hs * dt * 1.9;
       if (this.stepDist > (this.sprinting ? 2.4 : 1.9)) {
         this.stepDist = 0;
-        this.game.audio.play('step');
+        this.game.audio.play(wading ? 'splash' : 'step');
       }
     }
 

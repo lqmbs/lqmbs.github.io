@@ -203,3 +203,23 @@ export function roofTiles() {
   speckle(ctx, size, 300, 0.15);
   return finish(c);
 }
+
+/** Molten rock: dark crust veined with glowing channels. */
+export function lava() {
+  const size = 64;
+  const [c, ctx] = canvas(size);
+  ctx.fillStyle = '#ff6a14';
+  ctx.fillRect(0, 0, size, size);
+  for (let i = 0; i < 40; i++) {
+    ctx.fillStyle = pick(['#ffb040', '#ff8a20', '#ffd070']);
+    ctx.fillRect(randInt(0, size), randInt(0, size), randInt(2, 8), randInt(1, 3));
+  }
+  for (let i = 0; i < 26; i++) {
+    ctx.fillStyle = pick(['#2a1008', '#3a160a', '#1e0a06']);
+    const x = randInt(0, size), y = randInt(0, size), w = randInt(5, 16), h = randInt(4, 12);
+    ctx.fillRect(x, y, w, h);
+    if (x + w > size) ctx.fillRect(x - size, y, w, h);
+    if (y + h > size) ctx.fillRect(x, y - size, w, h);
+  }
+  return finish(c);
+}

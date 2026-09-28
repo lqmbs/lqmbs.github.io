@@ -34,13 +34,36 @@ export const CONFIG = {
   },
 };
 
-export const FLOOR_THEMES = [
-  { name: 'The Sapphire Undercroft', fog: 0x15294c, sky: 0x5a7cc4, crystal: 0x4aa8ff, boss: 'Gaoler of Bones' },
-  { name: 'Halls of the Hollowed', fog: 0x1a1c38, sky: 0x6670b4, crystal: 0x7a8cff, boss: 'The Hollow Warden' },
-  { name: 'The Weeping Geode', fog: 0x0e2830, sky: 0x4a90a0, crystal: 0x46e0d0, boss: 'Ossified Sentinel' },
-  { name: 'Cathedral of Ash', fog: 0x2a1a1e, sky: 0x8a6070, crystal: 0xff8a5a, boss: 'Ashen Castellan' },
-  { name: 'The Abyssal Choir', fog: 0x16102e, sky: 0x5a48a8, crystal: 0xa070ff, boss: 'Keeper of the Last Door' },
-];
+/**
+ * Biomes. Each expedition floor draws one: palette, fog, what fills the abyss, how it's lit,
+ * the local breed of dead, and whose arena waits at the end.
+ */
+export const BIOMES = {
+  crystal: {
+    id: 'crystal', name: 'The Sapphire Undercroft', abyss: 'void', lighting: 'dark', fogDensity: 0.019,
+    fog: 0x15294c, sky: 0x5a7cc4, crystal: 0x4aa8ff, mist: 0x5a7ab0,
+    stone: { floor: 0xa4a8b4, brick: 0x8e94a6, trim: 0x3e4250, rock: 0x8a8e9a },
+    bone: 0xc9bfa6, eyes: 0xff2a10, prefix: '', signature: 'knight', elite: 'knight', boss: 'Gaoler of Bones',
+  },
+  sunken: {
+    id: 'sunken', name: 'The Drowned Cathedral', abyss: 'water', lighting: 'dark', fogDensity: 0.024,
+    fog: 0x1a2e2c, sky: 0x6a9a8c, crystal: 0x7af0b8, mist: 0x6a9a8c,
+    stone: { floor: 0x8e9e92, brick: 0x7c8e84, trim: 0x34423c, rock: 0x6e7c72 },
+    bone: 0x8e9c84, eyes: 0x9affc8, prefix: 'Drowned', signature: 'drowned', elite: 'drowned', boss: 'The Sunken Abbess',
+  },
+  ember: {
+    id: 'ember', name: 'The Ember Fortress', abyss: 'lava', lighting: 'dark', fogDensity: 0.02,
+    fog: 0x2a120c, sky: 0xa8522a, crystal: 0xff7a2a, mist: 0x8a3a1a,
+    stone: { floor: 0x86766e, brick: 0x76625c, trim: 0x2c2220, rock: 0x5e4c46 },
+    bone: 0x4a3a30, eyes: 0xffa020, prefix: 'Charred', signature: 'hound', elite: 'hound', boss: 'The Kiln Tyrant',
+  },
+  sunlit: {
+    id: 'sunlit', name: 'The Sunlit Ruins', abyss: 'clouds', lighting: 'sun', fogDensity: 0.011,
+    fog: 0x9aa8a8, sky: 0xc0ccc8, crystal: 0xf0d890, mist: 0xe8ecea,
+    stone: { floor: 0xc6bca6, brick: 0xb8ae98, trim: 0x807866, rock: 0xa89e8a },
+    bone: 0xece4d0, eyes: 0xff4a20, prefix: 'Bleached', signature: 'gargoyle', elite: 'gargoyle', boss: 'The Last Seneschal',
+  },
+};
 
 export const DIRS = {
   n: { dx: 0, dy: -1, x: 0, z: -1, opposite: 's' },
