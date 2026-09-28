@@ -9,7 +9,12 @@
   <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=IM+Fell+English:ital@0;1&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
   <script type="importmap">
-    { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js" } }
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
+      }
+    }
   </script>
 </head>
 <body>
@@ -30,9 +35,13 @@
 
     <div id="relics"></div>
 
+    <div id="crosshair"></div>
+    <div id="perilous"><span class="rune"></span><span class="label">Perilous</span></div>
+
     <div id="boss" class="hidden">
       <div class="boss-name"></div>
       <div class="bar boss-bar"><div class="trail"></div><div class="fill"></div></div>
+      <div class="posture"><div class="posture-fill"></div></div>
     </div>
   </div>
 
@@ -47,12 +56,12 @@
   <div id="title-screen" class="overlay">
     <div class="title-inner">
       <h1>Ashen Descent</h1>
-      <p class="tagline">The lantern gutters. The dead do not rest.</p>
+      <p class="tagline">Below the sapphire dark, the dead still keep their vigil.</p>
       <ul class="controls">
-        <li><kbd>W A S D</kbd> Move</li>
-        <li><kbd>Mouse</kbd> Aim</li>
-        <li><kbd>Left Click</kbd> Slash</li>
-        <li><kbd>Space</kbd> Dodge roll</li>
+        <li><kbd>W A S D</kbd> Move &nbsp; <kbd>Shift</kbd> Sprint &nbsp; <kbd>Space</kbd> Jump</li>
+        <li><kbd>Mouse</kbd> Look &nbsp; <kbd>Left Click</kbd> Slash</li>
+        <li><kbd>Right Click</kbd> Guard — raise it <em>as the blow lands</em> to parry</li>
+        <li>A <span class="gleam">gleam</span> can be parried. A <span class="red">red glow</span> cannot — step away.</li>
         <li><kbd>Esc</kbd> Pause &nbsp; <kbd>M</kbd> Mute</li>
       </ul>
       <button id="start-btn">Descend</button>
@@ -63,7 +72,7 @@
     <div class="title-inner">
       <h2>Paused</h2>
       <div id="pause-stats"></div>
-      <p class="hint">Press Esc to resume</p>
+      <p class="hint">Click to resume</p>
     </div>
   </div>
 
