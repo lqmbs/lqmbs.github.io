@@ -68,6 +68,7 @@ export class Builder {
     const lane = 2.3 + r;
     const c = this.ch.center;
     if (Math.hypot(x - c.x, z - c.z) < 3.2 + r) return false;
+    if (this.ch.reserved?.some((s) => Math.hypot(x - s.x, z - s.z) < s.r + r)) return false;
     if (n.n && z < 0 && Math.abs(x) < lane) return false;
     if (n.s && z > 0 && Math.abs(x) < lane) return false;
     if (n.e && x > 0 && Math.abs(z) < lane) return false;

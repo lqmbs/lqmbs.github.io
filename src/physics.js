@@ -15,32 +15,52 @@ export class World {
     this.boxes = [];
     this.minWalkY = -Infinity;
     // Surfaces and obstacles are stored in chamber-local coordinates; queries arrive in world
-    // coordinates and are shifted by this offset (zero while a chamber is being built).
+    // coordinates and are shifted by this offset (zero while a chamber is being built). The
+    // vertical offset lets a chamber be raised onto an upper tier of the floor.
     this.ox = 0;
     this.oz = 0;
+    this.oy = 0;
   }
 
-  setOffset(x, z) {
+  setOffset(x, z, y = 0) {
     this.ox = x;
     this.oz = z;
+    this.oy = y;
   }
 
-  /** Copy another (offset-free) world's contents in, shifted into this world's local space. */
+  /**
+   * Copy another (offset-free) world's contents in, shifted into this world's local space.
+   * Returns the copies, so shared moving parts (lifts, shortcut gates) can be driven together.
+   */
   absorb(other, { skip = [] } = {}) {
-    const dx = -this.ox, dz = -this.oz;
+    const dx = -this.ox, dz = -this.oz, dy = -this.oy;
+    const out = { surfaces: [], circles: [], boxes: [] };
     for (const s of other.surfaces) {
       if (skip.includes(s.tag)) continue;
-      this.surfaces.push({ ...s, cx: s.cx + dx, cz: s.cz + dz });
+      const c = { ...s, cx: s.cx + dx, cz: s.cz + dz, top: s.top + dy, bottom: s.bottom + dy };
+      if (s.y !== undefined) c.y = s.y + dy;
+      if (s.y0 !== undefined) { c.y0 = s.y0 + dy; c.y1 = s.y1 + dy; }
+      this.surfaces.push(c);
+      out.surfaces.push(c);
     }
-    for (const c of other.circles) this.circles.push({ ...c, x: c.x + dx, z: c.z + dz });
-    for (const b of other.boxes) this.boxes.push({ ...b, x0: b.x0 + dx, x1: b.x1 + dx, z0: b.z0 + dz, z1: b.z1 + dz });
+    for (const c of other.circles) {
+      const k = { ...c, x: c.x + dx, z: c.z + dz, y0: c.y0 + dy, y1: c.y1 + dy };
+      this.circles.push(k);
+      out.circles.push(k);
+    }
+    for (const b of other.boxes) {
+      const k = { ...b, x0: b.x0 + dx, x1: b.x1 + dx, z0: b.z0 + dz, z1: b.z1 + dz, y0: b.y0 + dy, y1: b.y1 + dy };
+      this.boxes.push(k);
+      out.boxes.push(k);
+    }
+    return out;
   }
 
   /** Does a world-space point sit inside a solid obstacle or block of ground? */
   hitsObstacle(p, minRadius = 0.3) {
-    const x = p.x - this.ox, z = p.z - this.oz;
-    if (this.localSurfaceBlocks(x, z, p.y - 0.1, 0.2)) return true;
-    return this.circles.some((c) => c.enabled && c.r > minRadius && p.y > c.y0 && p.y < c.y1 && Math.hypot(x - c.x, z - c.z) < c.r);
+    const x = p.x - this.ox, z = p.z - this.oz, y = p.y - this.oy;
+    if (this.localSurfaceBlocks(x, z, y - 0.1, 0.2)) return true;
+    return this.circles.some((c) => c.enabled && c.r > minRadius && y > c.y0 && y < c.y1 && Math.hypot(x - c.x, z - c.z) < c.r);
   }
 
   addSurface(s) {
@@ -73,7 +93,7 @@ export class World {
   }
 
   /** Add an obstacle given in world coordinates (for props placed after a chamber is built). */
-  addCircleWorld(x, z, r, y0, y1) { return this.addCircle(x - this.ox, z - this.oz, r, y0, y1); }
+  addCircleWorld(x, z, r, y0, y1) { return this.addCircle(x - this.ox, z - this.oz, r, y0 - this.oy, y1 - this.oy); }
 
   addCircle(x, z, r, y0, y1) {
     const c = { x, z, r, y0, y1, enabled: true };
@@ -120,7 +140,8 @@ export class World {
 
   /** Highest ground under world (x, z) that can be stood on from `feetY` (no taller than a step). */
   groundAt(x, z, feetY = Infinity, step = STEP_HEIGHT) {
-    return this.localGroundAt(x - this.ox, z - this.oz, feetY, step);
+    const g = this.localGroundAt(x - this.ox, z - this.oz, feetY - this.oy, step);
+    return g === null ? null : g + this.oy;
   }
 
   localGroundAt(x, z, feetY = Infinity, step = STEP_HEIGHT) {
@@ -133,7 +154,7 @@ export class World {
   }
 
   surfaceBlocks(x, z, feetY, height) {
-    return this.localSurfaceBlocks(x - this.ox, z - this.oz, feetY, height);
+    return this.localSurfaceBlocks(x - this.ox, z - this.oz, feetY - this.oy, height);
   }
 
   localSurfaceBlocks(x, z, feetY, height) {
@@ -150,6 +171,7 @@ export class World {
     const k = r * 0.85;
     x -= this.ox;
     z -= this.oz;
+    feetY -= this.oy;
     return this.localSurfaceBlocks(x, z, feetY, height)
       || this.localSurfaceBlocks(x + k, z, feetY, height)
       || this.localSurfaceBlocks(x - k, z, feetY, height)
@@ -161,7 +183,7 @@ export class World {
   pushOut(pos, r, feetY, height) {
     pos.x -= this.ox;
     pos.z -= this.oz;
-    this.localPushOut(pos, r, feetY, height);
+    this.localPushOut(pos, r, feetY - this.oy, height);
     pos.x += this.ox;
     pos.z += this.oz;
   }

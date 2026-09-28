@@ -3,16 +3,27 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { DIRS, ARCH_STYLES } from './config.js';
 import { World } from './physics.js';
 import { Builder } from './architecture.js';
-import { rand, pick, shuffle, TAU } from './util.js';
+import { rand, pick, shuffle, chance, TAU, composeMatrix } from './util.js';
 import * as Textures from './textures.js';
-import { Chamber, CELL, GATE_PLANE } from './chamber.js';
+import { Chamber, CELL, GATE_PLANE, LEVEL_HEIGHT } from './chamber.js';
 import { COMBAT_LAYOUTS, latOf } from './layouts.js';
 import { createSkyDome } from './sky.js';
+import { Lift, ShortcutGate } from './lifts.js';
+
+const key = (x, y) => `${x},${y}`;
+const DIR_OF = { '1,0': 'e', '-1,0': 'w', '0,1': 's', '0,-1': 'n' };
 
 /**
- * A whole floor: an Isaac-style grid of chambers laid out in one continuous world. Neighbouring
- * gatehouses are joined by real bridges and stairs — the knight walks from chamber to chamber
- * without a cut, and the abyss, vista and weather belong to the floor as a whole.
+ * A whole floor: one continuous, tiered world of chambers.
+ *
+ *  - Chambers sit on a grid of cells, but the paths between them form loops, not a tree, so
+ *    there is always another way round and never a long walk back.
+ *  - Chambers stand on different tiers (LEVEL_HEIGHT apart): passages climb by stairs between
+ *    neighbouring tiers, and by lifts where the drop is too great.
+ *  - Some cells are stacked: a high span bridges across above a lower chamber, with a lift
+ *    between them.
+ *  - Some loop passages are shortcuts: a portcullis with a lever on one side only.
+ *  - Far beyond the guardian's arena rises the floor's citadel, a landmark seen from anywhere.
  */
 export class DungeonFloor {
   constructor(game, depth, biome, style = ARCH_STYLES.gothic) {
@@ -21,6 +32,10 @@ export class DungeonFloor {
     this.biome = biome;
     this.style = style;
     this.rooms = new Map();
+    this.spans = new Map();
+    this.edges = [];
+    this.lifts = [];
+    this.gates = [];
     this.layoutBag = [];
     this.grassSpots = [];
     this.active = [];
@@ -34,64 +49,179 @@ export class DungeonFloor {
   }
 
   /** Chamber archetypes are dealt from the floor style's own deck, so no two floors look alike. */
-  nextLayout() {
-    if (!this.layoutBag.length) this.layoutBag = shuffle(this.style.layouts.filter((k) => COMBAT_LAYOUTS[k]));
-    return this.layoutBag.pop();
+  nextLayout(allowed = null) {
+    const ok = (k) => COMBAT_LAYOUTS[k] && (!allowed || allowed.includes(k));
+    let i = this.layoutBag.findIndex(ok);
+    if (i < 0) {
+      this.layoutBag = shuffle(this.style.layouts.filter((k) => COMBAT_LAYOUTS[k]));
+      i = this.layoutBag.findIndex(ok);
+    }
+    if (i < 0) return pick((allowed || Object.keys(COMBAT_LAYOUTS)).filter((k) => COMBAT_LAYOUTS[k]));
+    return this.layoutBag.splice(i, 1)[0];
   }
 
-  key(x, y) { return `${x},${y}`; }
-  get(x, y) { return this.rooms.get(this.key(x, y)); }
+  get(x, y) { return this.rooms.get(key(x, y)); }
+  getSpan(x, y) { return this.spans.get(key(x, y)); }
+  get allRooms() { return [...this.rooms.values(), ...this.spans.values()]; }
 
-  roomAt(x, z) { return this.get(Math.round(x / CELL), Math.round(z / CELL)) || null; }
+  /** The chamber at a point — in a stacked cell, whichever tier the knight is nearer. */
+  roomAt(x, z, y = 0) {
+    const gx = Math.round(x / CELL), gy = Math.round(z / CELL);
+    const g = this.get(gx, gy), s = this.getSpan(gx, gy);
+    if (!s || !g) return s || g || null;
+    return y > (s.elev + g.elev) / 2 + 2 ? s : g;
+  }
+
+  // ---- Generation ------------------------------------------------------------
 
   generate() {
-    const target = Math.min(7 + this.depth * 2, 14);
-    for (let attempt = 0; attempt < 200; attempt++) {
-      const cells = new Map([[this.key(0, 0), [0, 0]]]);
-      const queue = [[0, 0]];
-      for (let guard = 0; queue.length && cells.size < target && guard < 500; guard++) {
-        const [cx, cy] = queue.shift();
-        for (const dir of shuffle(Object.keys(DIRS))) {
-          const nx = cx + DIRS[dir].dx, ny = cy + DIRS[dir].dy;
-          const k = this.key(nx, ny);
-          if (cells.has(k) || cells.size >= target || Math.random() < 0.45) continue;
-          const touching = Object.values(DIRS).filter((d) => cells.has(this.key(nx + d.dx, ny + d.dy))).length;
-          if (touching > 1) continue;
-          cells.set(k, [nx, ny]);
-          queue.push([nx, ny]);
-        }
-        if (!queue.length && cells.size < target) queue.push(pick([...cells.values()]));
+    const target = Math.min(9 + this.depth * 2, 15);
+    for (let attempt = 0; attempt < 300; attempt++) {
+      // 1. A compact blob of cells, inside a bounding box (the start sits off-centre in it), so
+      //    neighbours touch on many sides and the paths can close into loops.
+      const cells = new Map([[key(0, 0), [0, 0]]]);
+      const [bw, bh] = pick([[5, 4], [4, 5], [5, 5], [6, 3], [3, 6]]);
+      const x0 = -Math.floor(Math.random() * bw), y0 = -Math.floor(Math.random() * bh);
+      for (let guard = 0; cells.size < target && guard < 2000; guard++) {
+        const [cx, cy] = pick([...cells.values()]);
+        const d = pick(Object.values(DIRS));
+        const nx = cx + d.dx, ny = cy + d.dy;
+        if (nx < x0 || nx >= x0 + bw || ny < y0 || ny >= y0 + bh || cells.has(key(nx, ny))) continue;
+        // Compact enough to close loops, loose enough to keep some long arms.
+        const touching = Object.values(DIRS).filter((q) => cells.has(key(nx + q.dx, ny + q.dy))).length;
+        if (touching >= 3 && chance(0.5)) continue;
+        cells.set(key(nx, ny), [nx, ny]);
       }
       if (cells.size < target) continue;
-
-      const neighborCount = ([x, y]) => Object.values(DIRS).filter((d) => cells.has(this.key(x + d.dx, y + d.dy))).length;
-      const deadEnds = [...cells.values()].filter((c) => (c[0] || c[1]) && neighborCount(c) === 1);
-      if (deadEnds.length < 2) continue;
-      const dist = this.distances(cells);
-      deadEnds.sort((a, b) => dist.get(this.key(...b)) - dist.get(this.key(...a)));
-      const boss = deadEnds[0];
-      if (dist.get(this.key(...boss)) < 3) continue;
-      const treasure = deadEnds[1 + Math.floor(Math.random() * (deadEnds.length - 1))];
-      // The merchant keeps to a quiet dead end of his own when there is one.
-      const spare = deadEnds.filter((c) => c !== boss && c !== treasure);
-      const loose = [...cells.values()].filter((c) => c !== boss && c !== treasure && (c[0] || c[1]) && dist.get(this.key(...c)) >= 1);
-      const shop = spare.length ? pick(spare) : pick(loose);
-      const special = new Set([this.key(...boss), this.key(...treasure), this.key(...shop), this.key(0, 0)]);
-      const elites = shuffle([...cells.values()].filter((c) => !special.has(this.key(...c)) && dist.get(this.key(...c)) >= 2))
-        .slice(0, this.depth >= 2 ? 2 : 1).map((c) => this.key(...c));
-
-      for (const [x, y] of cells.values()) {
-        const k = this.key(x, y);
-        let type = 'combat';
-        if (x === 0 && y === 0) type = 'start';
-        else if (k === this.key(...boss)) type = 'boss';
-        else if (k === this.key(...treasure)) type = 'treasure';
-        else if (k === this.key(...shop)) type = 'shop';
-        else if (elites.includes(k)) type = 'elite';
-        this.rooms.set(k, new Chamber(this.game, this, x, y, type));
+      const adj = (k) => {
+        const [x, y] = cells.get(k);
+        return Object.values(DIRS).map((d) => key(x + d.dx, y + d.dy)).filter((n) => cells.has(n));
+      };
+      // 2. A random spanning tree — the bones of the floor.
+      const tree = new Set();
+      const seen = new Set([key(0, 0)]);
+      const stack = [key(0, 0)];
+      while (stack.length) {
+        const k = stack[stack.length - 1];
+        const next = shuffle(adj(k).filter((n) => !seen.has(n)));
+        if (!next.length) { stack.pop(); continue; }
+        const n = next[0];
+        seen.add(n);
+        tree.add(edgeKey(k, n));
+        stack.push(n);
       }
-      for (const room of this.rooms.values()) {
-        for (const [dir, d] of Object.entries(DIRS)) room.neighbors[dir] = this.get(room.gx + d.dx, room.gy + d.dy) || null;
+      const treeDeg = (k) => adj(k).filter((n) => tree.has(edgeKey(k, n))).length;
+      const treeDist = bfs(cells, (k) => adj(k).filter((n) => tree.has(edgeKey(k, n))));
+      const leaves = [...cells.keys()].filter((k) => k !== key(0, 0) && treeDeg(k) === 1)
+        .sort((a, b) => treeDist.get(b) - treeDist.get(a));
+      if (leaves.length < 2 || treeDist.get(leaves[0]) < 3) continue;
+      // Dead ends are cut off from loops, so prefer tucked-away leaves (fewest neighbours).
+      const tucked = (k) => adj(k).length;
+      const far = leaves.filter((k) => treeDist.get(k) >= 3).sort((a, b) => tucked(a) - tucked(b) || treeDist.get(b) - treeDist.get(a));
+      const boss = far[0];
+      const rest = leaves.filter((k) => k !== boss).sort((a, b) => tucked(a) - tucked(b));
+      const treasure = rest[0];
+      const spare = rest.slice(1);
+      const shop = spare.length ? spare[0] : pick([...cells.keys()].filter((k) => k !== key(0, 0) && k !== boss && k !== treasure));
+      // Only the guardian keeps a single door; the treasury and the merchant may be looped past.
+      const deadEnds = new Set([boss]);
+
+      // 3. Spans: a high bridge-hall across a cell whose chamber leaves that axis free.
+      const spanCells = [];
+      const maxSpans = this.depth >= 2 ? 2 : 1;
+      for (const k of shuffle([...cells.keys()])) {
+        if (spanCells.length >= maxSpans) break;
+        if (k === key(0, 0) || deadEnds.has(k) || k === shop || k === treasure) continue;
+        const [x, y] = cells.get(k);
+        for (const axis of shuffle(['x', 'z'])) {
+          const [a, b] = axis === 'x' ? [key(x - 1, y), key(x + 1, y)] : [key(x, y - 1), key(x, y + 1)];
+          if (!cells.has(a) || !cells.has(b) || deadEnds.has(a) || deadEnds.has(b)) continue;
+          if (tree.has(edgeKey(k, a)) || tree.has(edgeKey(k, b))) continue;
+          if (spanCells.some((s) => [s.k, s.a, s.b].some((c) => [k, a, b].includes(c)))) continue;
+          spanCells.push({ k, axis, a, b });
+          break;
+        }
+      }
+      // Every floor should have a stacked cell if its shape allows one; reshuffle until it does.
+      if (!spanCells.length && attempt < 200) continue;
+      const spanBlocked = new Set(spanCells.flatMap((s) => [edgeKey(s.k, s.a), edgeKey(s.k, s.b)]));
+
+      // 4. Loops: extra passages between neighbours, so there is always another way round.
+      const edges = new Set(tree);
+      const extra = [];
+      for (const k of cells.keys()) {
+        for (const n of adj(k)) {
+          const e = edgeKey(k, n);
+          if (edges.has(e) || spanBlocked.has(e) || deadEnds.has(k) || deadEnds.has(n)) continue;
+          if (chance(0.8)) { edges.add(e); extra.push(e); }
+        }
+      }
+
+      // 5. Tiers: each chamber climbs or falls a level from the one it was reached from.
+      const level = new Map([[key(0, 0), 0]]);
+      const q = [key(0, 0)];
+      while (q.length) {
+        const k = q.shift();
+        for (const n of adj(k)) {
+          if (!edges.has(edgeKey(k, n)) || level.has(n)) continue;
+          level.set(n, Math.max(0, Math.min(2, level.get(k) + pick([-1, 0, 1, 1]))));
+          q.push(n);
+        }
+      }
+      // The guardian waits above everything it guards.
+      const bossNb = adj(boss).find((n) => edges.has(edgeKey(boss, n)));
+      level.set(boss, Math.min(3, level.get(bossNb) + 1));
+
+      // 6. Shortcuts: some loop passages are barred, openable only from the far side.
+      const dist = bfs(cells, (k) => adj(k).filter((n) => edges.has(edgeKey(k, n))));
+      const shortcuts = new Map();
+      for (const e of extra) {
+        if (!chance(0.45)) continue;
+        const [p, r] = e.split('|');
+        // The lever sits on the side farther from the start: you open it on your way back.
+        shortcuts.set(e, dist.get(p) >= dist.get(r) ? p : r);
+      }
+      const elites = shuffle([...cells.keys()].filter((k) => !deadEnds.has(k) && k !== key(0, 0) && k !== shop && k !== treasure && dist.get(k) >= 2))
+        .slice(0, this.depth >= 2 ? 2 : 1);
+
+      // 7. Raise the chambers.
+      for (const [k, [x, y]] of cells) {
+        let type = 'combat';
+        if (k === key(0, 0)) type = 'start';
+        else if (k === boss) type = 'boss';
+        else if (k === treasure) type = 'treasure';
+        else if (k === shop) type = 'shop';
+        else if (elites.includes(k)) type = 'elite';
+        this.rooms.set(k, new Chamber(this.game, this, x, y, type, { level: level.get(k) }));
+      }
+      for (const s of spanCells) {
+        const [x, y] = cells.get(s.k);
+        const lower = this.rooms.get(s.k);
+        const span = new Chamber(this.game, this, x, y, 'combat', { level: lower.level + 4, span: true });
+        span.spanAxis = s.axis;
+        span.below = lower;
+        lower.under = true;
+        lower.above = span;
+        this.spans.set(s.k, span);
+      }
+      const link = (A, B, dir, opts = {}) => {
+        A.neighbors[dir] = B;
+        B.neighbors[DIRS[dir].opposite] = A;
+        this.edges.push({ a: A, b: B, dir, ...opts });
+      };
+      for (const e of edges) {
+        const [p, r] = e.split('|');
+        const A = this.rooms.get(p), B = this.rooms.get(r);
+        const dir = DIR_OF[`${B.gx - A.gx},${B.gy - A.gy}`];
+        const lever = shortcuts.get(e);
+        link(A, B, dir, lever ? { shortcut: true, leverRoom: this.rooms.get(lever) } : {});
+      }
+      for (const s of spanCells) {
+        const span = this.spans.get(s.k);
+        for (const nk of [s.a, s.b]) {
+          const N = this.rooms.get(nk);
+          link(span, N, DIR_OF[`${N.gx - span.gx},${N.gy - span.gy}`]);
+        }
       }
       this.start = this.get(0, 0);
       return;
@@ -99,31 +229,61 @@ export class DungeonFloor {
     throw new Error('Failed to generate dungeon floor');
   }
 
-  distances(cells) {
-    const dist = new Map([[this.key(0, 0), 0]]);
-    const q = [[0, 0]];
-    while (q.length) {
-      const [x, y] = q.shift();
-      for (const d of Object.values(DIRS)) {
-        const k = this.key(x + d.dx, y + d.dy);
-        if (cells.has(k) && !dist.has(k)) {
-          dist.set(k, dist.get(this.key(x, y)) + 1);
-          q.push([x + d.dx, y + d.dy]);
-        }
-      }
-    }
-    return dist;
-  }
+  // ---- Building --------------------------------------------------------------
 
   /** Build every chamber, then stitch them together and dress the surrounding void. */
   build() {
     for (const room of this.rooms.values()) room.build();
-    for (const room of this.rooms.values()) {
-      for (const dir of ['e', 's']) if (room.neighbors[dir]) this.buildPassage(room, room.neighbors[dir], dir);
+    // Spans after the chambers beneath them, so their lift can find the floor below.
+    for (const span of this.spans.values()) {
+      span.liftSpot = this.findLiftSpot(span);
+      span.liftAt = span.liftSpot?.u ?? null;
+      span.build();
     }
+    for (const e of this.edges) this.buildPassage(e);
+    for (const span of this.spans.values()) if (span.liftSpot) this.buildSpanLift(span);
     this.buildSurroundings();
     this.buildGrass();
-    for (const room of this.rooms.values()) room.setVisible(false);
+    for (const room of this.allRooms) room.setVisible(false);
+  }
+
+  /** A spot on the span's axis with open floor beneath it, in the chamber below. */
+  findLiftSpot(span) {
+    const lower = span.below;
+    const W = lower.world;
+    for (const u of [4.5, -4.5, 6, -6, 7.5, -7.5, 9, -9, 10.5, -10.5, 12, -12, 13.5, -13.5]) {
+      const [x, z] = span.spanAxis === 'x' ? [u, 0] : [0, u];
+      let ok = true;
+      let g = null;
+      for (const [ox, oz] of [[0, 0], [1.1, 1.1], [-1.1, 1.1], [1.1, -1.1], [-1.1, -1.1]]) {
+        const h = W.localGroundAt(x + ox, z + oz, Infinity);
+        const water = W.surfaces.find((s) => s.tag === 'water');
+        if (h === null || (water && h <= W.heightOf(water, x, z) + 0.01)) { ok = false; break; }
+        if (g !== null && Math.abs(h - g) > 0.3) { ok = false; break; }
+        g = h;
+      }
+      if (!ok) continue;
+      // Pillars and statues in the way (balustrade posts don't count: the floor check covers edges).
+      if (W.circles.some((c) => c.r > 0.3 && Math.hypot(c.x - x, c.z - z) < c.r + 1.9 && c.y1 > g + 0.2)) continue;
+      if (W.boxes.some((b) => x + 2 > b.x0 && x - 2 < b.x1 && z + 2 > b.z0 && z - 2 < b.z1)) continue;
+      return { u, x, z, lowY: g + lower.elev };
+    }
+    return null;
+  }
+
+  /** The lift between a span and the chamber beneath it. */
+  buildSpanLift(span) {
+    const s = span.liftSpot, lower = span.below;
+    const x = span.ox + s.x, z = span.oz + s.z;
+    const lift = new Lift(this.game, this.root, x, z, s.lowY, span.elev, { startHigh: false });
+    const scratch = new World();
+    lift.addTo(scratch);
+    span.world.absorb(scratch);
+    lower.world.absorb(scratch);
+    lift.bind([span.world, lower.world]);
+    lower.reserved.push({ x: s.x, z: s.z, r: 2.6 });
+    this.lifts.push(lift);
+    span.lift = lift;
   }
 
   /** A pseudo-chamber for building floor-level geometry in world coordinates. */
@@ -131,10 +291,12 @@ export class DungeonFloor {
     return { world, neighbors: {}, center: { x: 1e9, y: 0, z: 1e9 }, type: 'passage', floor: this };
   }
 
-  buildPassage(A, B, dir) {
+  /** The way between two neighbouring gatehouses: stairs, or a lift where the drop is too great. */
+  buildPassage(edge) {
+    const { a: A, b: B, dir } = edge;
     const d = DIRS[dir];
     const lat = latOf(dir);
-    const ya = A.gates[dir].y, yb = B.gates[d.opposite].y;
+    const ya = A.gates[dir].y + A.elev, yb = B.gates[d.opposite].y + B.elev;
     const ax = A.ox + d.x * GATE_PLANE, az = A.oz + d.z * GATE_PLANE;
     const bx = B.ox - d.x * GATE_PLANE, bz = B.oz - d.z * GATE_PLANE;
     const world = new World();
@@ -149,20 +311,61 @@ export class DungeonFloor {
     const width = rand(3.2, 3.9);
     const dy = yb - ya;
     const at = (t) => [ax + d.x * t, az + d.z * t];
+    let lift = null;
     if (Math.abs(dy) < 0.05) {
       b.bridge(...at(-0.3), ...at(len + 0.3), ya, width);
-    } else {
-      const sl = Math.min(len - 1, Math.abs(dy) * 2.3);
+    } else if (Math.abs(dy) * 2.1 <= len - 1) {
+      const sl = Math.min(len - 1, Math.abs(dy) * 2.1);
       const s0 = (len - sl) / 2;
       b.bridge(...at(-0.3), ...at(s0 + 0.2), ya, width);
       b.stairs(...at(s0), ...at(s0 + sl), ya, yb, width);
       b.bridge(...at(s0 + sl - 0.2), ...at(len + 0.3), yb, width);
+    } else {
+      // Too steep for stairs: a high walk to a lift that drops to the lower gate.
+      const highA = ya > yb;
+      const tl = highA ? len - 3.2 : 3.2;
+      const [lx, lz] = at(tl);
+      lift = new Lift(this.game, this.root, lx, lz, Math.min(ya, yb), Math.max(ya, yb), { startHigh: chance(0.5) });
+      lift.addTo(world);
+      if (highA) {
+        b.bridge(...at(-0.3), ...at(tl - 1.6), ya, width);
+        b.bridge(...at(tl + 1.6), ...at(len + 0.3), yb, width, { arches: false });
+      } else {
+        b.bridge(...at(-0.3), ...at(tl - 1.6), ya, width, { arches: false });
+        b.bridge(...at(tl + 1.6), ...at(len + 0.3), yb, width);
+      }
+      this.lifts.push(lift);
+      edge.lift = lift;
     }
-    const [mx, mz] = at(len / 2);
-    b.archway(mx, mz, Math.min(ya, yb), Math.atan2(-lat.z, lat.x), width + 0.6, rand(6, 8));
+    let gate = null;
+    if (edge.shortcut && !lift) {
+      // A barred portcullis mid-passage; the lever stands on the far side.
+      const [mx, mz] = at(len / 2);
+      const my = (ya + yb) / 2;
+      const leverA = edge.leverRoom === A;
+      const [lvx, lvz] = at(len / 2 + (leverA ? -1.6 : 1.6));
+      const [fx, fz] = at(len / 2 + (leverA ? 1.6 : -1.6));
+      const lx = lvx + lat.x * (width / 2 - 0.5), lz = lvz + lat.z * (width / 2 - 0.5);
+      const ly = world.groundAt(lx, lz, my + 2) ?? my;
+      const fy = world.groundAt(fx, fz, my + 2) ?? my;
+      gate = new ShortcutGate(this.game, this.root, mx, my, mz, Math.atan2(-lat.z, lat.x), {
+        pos: new THREE.Vector3(lx, ly, lz), farPos: new THREE.Vector3(fx, fy, fz),
+      });
+      gate.addTo(world);
+      (leverA ? A : B).interactables.push(gate);
+      (leverA ? B : A).interactables.push(gate.far);
+      gate.lists = [[(leverA ? A : B).interactables, gate], [(leverA ? B : A).interactables, gate.far]];
+      this.gates.push(gate);
+      edge.gate = gate;
+    } else if (!lift) {
+      const [mx, mz] = at(len / 2);
+      b.archway(mx, mz, Math.min(ya, yb), Math.atan2(-lat.z, lat.x), width + 0.6, rand(6, 8));
+    }
     b.parapets({ breakChance: 0 });
     b.batch.build(this.root);
     for (const room of [A, B]) room.world.absorb(world, { skip: ['stubEnd', 'water'] });
+    lift?.bind([A.world, B.world]);
+    gate?.bind([A.world, B.world]);
   }
 
   bounds() {
@@ -179,9 +382,10 @@ export class DungeonFloor {
     this.center = { cx, cz, radius };
     const b = new Builder(this.game, this.scratch(new World()));
     b.vista(cx, cz, radius + 12, radius + 90);
+    this.buildCitadel(b, cx, cz, radius);
     b.batch.build(this.root);
 
-    const size = radius * 2 + 500;
+    const size = radius * 2 + 700;
     switch (this.biome.abyss) {
       case 'water': {
         const tex = Textures.mist();
@@ -205,6 +409,60 @@ export class DungeonFloor {
         this.sky = createSkyDome({ sunDir: new THREE.Vector3(0.5, 0.55, -0.4), bright: 1.0 });
         this.root.add(this.sky);
         break;
+    }
+  }
+
+  /**
+   * The citadel: a colossal keep beyond the guardian's arena, lit windows and all, so wherever
+   * you stand on the floor you can see where you are going.
+   */
+  buildCitadel(b, cx, cz, radius) {
+    const boss = [...this.rooms.values()].find((r) => r.type === 'boss');
+    let vx = boss.ox - cx, vz = boss.oz - cz;
+    const vl = Math.hypot(vx, vz) || 1;
+    vx /= vl; vz /= vl;
+    if (vl < 1) { vx = 0; vz = -1; }
+    const x = boss.ox + vx * 72, z = boss.oz + vz * 72;
+    this.citadel = { x, z };
+    // A beacon burns at its crown, bright enough to pierce any fog: follow it to the guardian.
+    const beaconColor = { crystal: 0x6ab8ff, sunken: 0x7af0b8, ember: 0xff5a20, sunlit: 0xfff0c0 }[this.biome.id] ?? 0xffe0a0;
+    const beam = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 4, 220, 12, 1, true),
+      new THREE.MeshBasicMaterial({ color: beaconColor, transparent: true, opacity: 0.1, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, side: THREE.DoubleSide }));
+    beam.position.set(x, 95 + 110, z);
+    const crown = new THREE.Mesh(new THREE.OctahedronGeometry(3.5, 0), new THREE.MeshBasicMaterial({ color: beaconColor, fog: false }));
+    crown.position.set(x, 100, z);
+    crown.scale.y = 1.8;
+    const halo = new THREE.Mesh(new THREE.SphereGeometry(9, 12, 8),
+      new THREE.MeshBasicMaterial({ color: beaconColor, transparent: true, opacity: 0.12, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    halo.position.copy(crown.position);
+    this.root.add(beam, crown, halo);
+    this.beacon = { crown, halo };
+    const M = b.M;
+    const base = -40;
+    // The crag it stands on.
+    for (let i = 0; i < 7; i++) {
+      const s = rand(18, 34);
+      b.add(new THREE.DodecahedronGeometry(1, 0), M.rock, composeMatrix(x + rand(-20, 20), base + rand(0, 25), z + rand(-20, 20), rand(0, 3), rand(0, 3), 0, s, s * rand(1.2, 2), s), { cast: false });
+    }
+    // The great keep and its crown of spires.
+    b.tower(x, z, base, 95, 18, { windowChance: 0.45, roof: 'spire', cast: false });
+    for (let i = 0; i < 7; i++) {
+      const a = (i / 7) * TAU + rand(-0.2, 0.2), r = rand(20, 34);
+      const tx = x + Math.cos(a) * r, tz = z + Math.sin(a) * r;
+      b.tower(tx, tz, base + rand(0, 20), rand(40, 80), rand(5, 9), { windowChance: 0.4, cast: false });
+      if (i % 2 === 0) {
+        const bx = (x + tx) / 2, bz = (z + tz) / 2;
+        const len = Math.hypot(tx - x, tz - z);
+        b.add(new THREE.BoxGeometry(3, 2, len), M.brick, composeMatrix(bx, rand(35, 60), bz, 0, Math.atan2(tx - x, tz - z)), { cast: false });
+      }
+    }
+    // Falls pouring from the crag: lava, water or light, by biome.
+    const fallMat = this.biome.abyss === 'lava' ? this.game.materials.lava : this.biome.abyss === 'water' ? this.game.materials.shaft : null;
+    if (fallMat) {
+      for (let i = 0; i < 3; i++) {
+        const a = rand(0, TAU);
+        b.add(new THREE.BoxGeometry(rand(2, 4), 70, 0.5), fallMat, composeMatrix(x + Math.cos(a) * 26, base + 5, z + Math.sin(a) * 26, 0, a), { cast: false, receive: false });
+      }
     }
   }
 
@@ -241,10 +499,12 @@ export class DungeonFloor {
     this.root.add(grass);
   }
 
-  /** Show and simulate the chamber the knight is in plus its neighbours; hide the rest. */
+  // ---- Frame -------------------------------------------------------------------
+
+  /** Show and simulate the chambers around the knight (both tiers of a stacked cell); hide the rest. */
   update(dt, current) {
     const near = [];
-    for (const r of this.rooms.values()) {
+    for (const r of this.allRooms) {
       const on = Math.max(Math.abs(r.gx - current.gx), Math.abs(r.gy - current.gy)) <= 1;
       if (on !== r.group.visible) r.setVisible(on);
       if (on) near.push(r);
@@ -252,6 +512,13 @@ export class DungeonFloor {
     this.active = near;
     for (const r of near) r.update(dt, r === current);
     this.activeEnemies = near.flatMap((r) => r.enemies);
+    for (const l of this.lifts) l.update(dt);
+    for (const g of this.gates) g.update(dt);
+    if (this.beacon) {
+      const t = this.game.time;
+      this.beacon.crown.rotation.y += dt * 0.6;
+      this.beacon.halo.scale.setScalar(1 + Math.sin(t * 1.7) * 0.12);
+    }
     const cam = this.game.camera.position;
     if (this.sky) this.sky.position.set(cam.x, 0, cam.z);
     if (this.surface?.material.map) {
@@ -267,4 +534,20 @@ export class DungeonFloor {
       if (o.isMesh && o.geometry !== this.game.flameGeo) o.geometry.dispose();
     });
   }
+}
+
+function edgeKey(a, b) { return a < b ? `${a}|${b}` : `${b}|${a}`; }
+
+function bfs(cells, neighbours) {
+  const start = key(0, 0);
+  const dist = new Map([[start, 0]]);
+  const q = [start];
+  while (q.length) {
+    const k = q.shift();
+    for (const n of neighbours(k)) {
+      if (!dist.has(n)) { dist.set(n, dist.get(k) + 1); q.push(n); }
+    }
+  }
+  for (const k of cells.keys()) if (!dist.has(k)) dist.set(k, 99);
+  return dist;
 }

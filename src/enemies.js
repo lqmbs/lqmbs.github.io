@@ -571,7 +571,8 @@ export class Enemy {
     if (ground !== null && ny <= ground) { this.pos.y = ground; this.vy = 0; }
     else if (ground !== null && this.pos.y - ground < 0.6 && this.vy <= 0) { this.pos.y = ground; this.vy = 0; }
     else this.pos.y = ny;
-    if (this.pos.y < -14) {
+    // Knocked off a ledge: far enough below its own tier, the dark takes it.
+    if (this.pos.y < (this.chamber.elev ?? 0) - 14) {
       this.game.audio.play('fall');
       this.die(true);
       return;

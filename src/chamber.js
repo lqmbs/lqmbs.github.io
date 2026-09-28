@@ -16,6 +16,10 @@ import { R, along, latOf, linkIslands, COMBAT_LAYOUTS, SPECIAL_LAYOUTS } from '.
 export const CELL = 70;
 /** Where a chamber's gatehouse arch stands, measured from its centre. */
 export const GATE_PLANE = R + 2.5;
+/** Height between tiers of a floor. */
+export const LEVEL_HEIGHT = 6;
+/** Chamber archetypes open enough at their heart to sit beneath a span and its lift. */
+const UNDER_SPAN = ['nave', 'terraces', 'causeway', 'ring', 'cloister', 'basilica', 'henge', 'ziggurat'];
 
 // ============================================================================
 // Fog wall — a curtain of pale mist sealing an elite or guardian arena.
@@ -110,7 +114,7 @@ class LockedGate {
     chamber.group.add(this.bars);
     this.blocker = chamber.world.addBox(x - lat.x * 2 - d.x * 0.4, z - lat.z * 2 - d.z * 0.4, x + lat.x * 2 + d.x * 0.4, z + lat.z * 2 + d.z * 0.4, y - 1, y + 6);
     const [ix, iz] = along(dir, GATE_PLANE + 1.4);
-    this.position = new THREE.Vector3(ix + chamber.ox, y, iz + chamber.oz);
+    this.position = new THREE.Vector3(ix + chamber.ox, y + chamber.elev, iz + chamber.oz);
     this.radius = 2.8;
     chamber.interactables.push(this);
   }
@@ -151,7 +155,7 @@ class LockedGate {
 // ============================================================================
 
 export class Chamber {
-  constructor(game, floor, gx, gy, type) {
+  constructor(game, floor, gx, gy, type, { level = 0, span = false } = {}) {
     this.game = game;
     this.floor = floor;
     this.gx = gx;
@@ -159,6 +163,12 @@ export class Chamber {
     this.ox = gx * CELL;
     this.oz = gy * CELL;
     this.type = type;
+    // Floors are tiered: each chamber stands on a level, LEVEL_HEIGHT apart. A span is a high
+    // bridge chamber crossing above another chamber in the same cell.
+    this.level = level;
+    this.elev = level * LEVEL_HEIGHT;
+    this.span = span;
+    this.reserved = [];
     this.neighbors = { n: null, s: null, e: null, w: null };
     this.state = ['combat', 'elite', 'boss'].includes(type) ? RoomState.DORMANT : RoomState.CLEARED;
     this.visited = false;
@@ -178,23 +188,26 @@ export class Chamber {
   }
 
   get sealing() { return this.type === 'elite' || this.type === 'boss'; }
-  worldCenter() { return new THREE.Vector3(this.center.x + this.ox, this.center.y, this.center.z + this.oz); }
+  worldCenter() { return new THREE.Vector3(this.center.x + this.ox, this.center.y + this.elev, this.center.z + this.oz); }
 
   build() {
     if (this.built) return;
     this.built = true;
     const game = this.game;
     const biome = this.floor.biome;
-    this.world = new World();
-    if (biome.abyss === 'water') this.world.addField(() => -0.45, { tag: 'water' });
+    const world = (this.world = new World());
+    // The flood lies at one absolute height, whatever tier the chamber stands on.
+    if (biome.abyss === 'water') world.addField(() => -0.45 - world.oy, { tag: 'water' });
     this.group = new THREE.Group();
-    this.group.position.set(this.ox, 0, this.oz);
+    this.group.position.set(this.ox, this.elev, this.oz);
     this.actors = new THREE.Group();
     this.floor.root.add(this.group, this.actors);
     const b = new Builder(game, this);
 
     let layout;
-    if (this.type === 'start') layout = SPECIAL_LAYOUTS.shrine;
+    if (this.span) layout = SPECIAL_LAYOUTS.span;
+    else if (this.under) layout = COMBAT_LAYOUTS[this.floor.nextLayout(UNDER_SPAN)];
+    else if (this.type === 'start') layout = SPECIAL_LAYOUTS.shrine;
     else if (this.type === 'treasure') layout = SPECIAL_LAYOUTS.reliquary;
     else if (this.type === 'shop') layout = SPECIAL_LAYOUTS.bazaar;
     else if (this.type === 'boss' || this.type === 'elite') layout = this.type === 'boss' || chance(0.5) ? SPECIAL_LAYOUTS.arena : COMBAT_LAYOUTS[this.floor.nextLayout()];
@@ -205,13 +218,15 @@ export class Chamber {
     for (const dir of Object.keys(DIRS)) if (this.neighbors[dir]) this.addGateway(b, dir);
     this.decorate(b);
     b.finish(this.group);
-    this.world.setOffset(this.ox, this.oz);
+    // Stand-ins that only existed to keep balustrades off the lift gap.
+    this.world.surfaces = this.world.surfaces.filter((s) => s.tag !== 'liftstub');
+    this.world.setOffset(this.ox, this.oz, this.elev);
 
-    const toWorld = (v) => v.clone().add(new THREE.Vector3(this.ox, 0, this.oz));
+    const toWorld = (v) => v.clone().add(new THREE.Vector3(this.ox, this.elev, this.oz));
     this.lightSpots = b.lightSpots.map((s) => ({ ...s, pos: toWorld(s.pos) }));
     this.emitters = b.emitters.map((e) => ({ ...e, pos: toWorld(e.pos) }));
     this.buildFlames(b.flames);
-    if (b.grass.length) this.floor.addGrass(b.grass.map((g) => ({ x: g.x + this.ox, y: g.y, z: g.z + this.oz })));
+    if (b.grass.length) this.floor.addGrass(b.grass.map((g) => ({ x: g.x + this.ox, y: g.y + this.elev, z: g.z + this.oz })));
 
     const c = this.worldCenter();
     if (this.type === 'treasure') {
@@ -221,13 +236,13 @@ export class Chamber {
     }
     if (this.type === 'shop') {
       const s = this.shopSpot;
-      this.shop = new Shop(game, this, s.x + this.ox, this.center.y, s.z + this.oz, s.facing);
+      this.shop = new Shop(game, this, s.x + this.ox, this.center.y + this.elev, s.z + this.oz, s.facing);
     }
     if (this.type === 'start') this.floor.startPose = { x: c.x, y: c.y, z: c.z + 3.4, yaw: 0 };
     // Now and then a chest has been left behind in a fighting chamber.
-    if (this.type === 'combat' && chance(0.22)) {
+    if (this.type === 'combat' && !this.span && chance(0.22)) {
       const p = b.rimSpot(['hub'], 1, 1.8);
-      if (p) new Chest(game, this, p.x + this.ox, p.y, p.z + this.oz, chance(0.3) ? 'gold' : 'wood', Math.atan2(-p.x, -p.z));
+      if (p) new Chest(game, this, p.x + this.ox, p.y + this.elev, p.z + this.oz, chance(0.3) ? 'gold' : 'wood', Math.atan2(-p.x, -p.z));
     }
     this.placeEnemies();
   }
@@ -262,7 +277,9 @@ export class Chamber {
     const landingInner = R - 2.5;
     const gap = landingInner - anchor.along;
     let gateY = anchor.y;
-    if (gap > 7 && chance(0.5)) gateY = anchor.y + pick([-1.6, 1.6]);
+    // Lean the gate towards the neighbour's tier, so the passage between them climbs gently.
+    const toward = Math.sign((this.neighbors[dir]?.elev ?? this.elev) - this.elev);
+    if (gap > 7 && (toward !== 0 || chance(0.5))) gateY = anchor.y + (toward || pick([-1, 1])) * 1.6;
     gateY = Math.max(-2.4, Math.min(3.2, gateY));
     let stairsLen = Math.abs(gateY - anchor.y) * 2.3;
     if (stairsLen > gap - 1.5) { gateY = anchor.y; stairsLen = 0; }
@@ -501,13 +518,14 @@ export class Chamber {
       const s = pick(surfaces);
       const p = samplePoint(s, 1.2);
       if (!p) continue;
-      const x = p.x + this.ox, z = p.z + this.oz;
-      const g = W.groundAt(x, z);
-      if (g === null || Math.abs(g - p.y) > 0.05) continue;
+      const x = p.x + this.ox, z = p.z + this.oz, y = p.y + this.elev;
+      const g = W.groundAt(x, z, y + 0.1);
+      if (g === null || Math.abs(g - y) > 0.05) continue;
       if (Math.hypot(x - pp.x, z - pp.z) < minDist) continue;
       if (W.circles.some((c) => Math.hypot(c.x - p.x, c.z - p.z) < c.r + 0.8)) continue;
       if (this.enemies.some((e) => Math.hypot(e.pos.x - x, e.pos.z - z) < 1.6)) continue;
-      return { x, y: p.y, z };
+      if (this.reserved.some((r) => Math.hypot(r.x - p.x, r.z - p.z) < r.r)) continue;
+      return { x, y, z };
     }
     return this.worldCenter();
   }
@@ -520,7 +538,7 @@ export class Chamber {
     const game = this.game;
     const biome = this.floor.biome;
     if (this.type === 'combat') {
-      const count = Math.min(7, 2 + game.depth + randInt(0, 2));
+      const count = Math.min(this.span ? 4 : 7, 2 + game.depth + randInt(0, 2) - (this.span ? 1 : 0));
       for (let i = 0; i < count; i++) {
         const Type = pickEnemyType(game.depth, biome);
         const p = this.spawnPoint(0);
@@ -545,6 +563,9 @@ export class Chamber {
     this.visited = true;
     this.seen = true;
     for (const n of Object.values(this.neighbors)) if (n) n.seen = true;
+    // In a stacked cell you can see the other tier too.
+    if (this.above) this.above.seen = true;
+    if (this.below) this.below.seen = true;
   }
 
   wake() {
@@ -628,7 +649,7 @@ export class Chamber {
     const dir = free[0] ?? 'e';
     const [x, z] = along(dir, 9.5);
     const d = DIRS[dir];
-    this.openPortal(x + this.ox, this.center.y, z + this.oz, Math.atan2(-d.x, -d.z));
+    this.openPortal(x + this.ox, this.center.y + this.elev, z + this.oz, Math.atan2(-d.x, -d.z));
   }
 
   /** A rift to the devil's or the angel's realm tears open here. */

@@ -1063,7 +1063,7 @@ class Game {
       this.player.update(dt);
       if (this.realm) this.realm.update(dt);
       else if (this.mode === 'run' && this.floor) {
-        const r = this.floor.roomAt(this.player.pos.x, this.player.pos.z);
+        const r = this.floor.roomAt(this.player.pos.x, this.player.pos.z, this.player.pos.y);
         if (r && r !== this.room) this.switchRoom(r);
         this.floor.update(dt, this.room);
         this.lightTimer -= realDt;

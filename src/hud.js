@@ -395,18 +395,24 @@ export class HUD {
     ctx.clearRect(0, 0, W, H);
     ctx.fillStyle = 'rgba(4,4,8,0.55)';
     ctx.fillRect(0, 0, W, H);
-    ctx.lineWidth = 3;
-    // Passages first, under the rooms.
-    for (const r of floor.rooms.values()) {
-      if (!r.seen) continue;
-      for (const dir of ['e', 's']) {
-        const n = r.neighbors[dir];
-        if (!n || !n.seen) continue;
-        ctx.strokeStyle = r.visited || n.visited ? '#6a6f80' : '#2e323c';
-        ctx.beginPath();
-        ctx.moveTo(sx(r.ox), sy(r.oz));
-        ctx.lineTo(sx(n.ox), sy(n.oz));
-        ctx.stroke();
+    // Passages first, under the rooms. Shortcuts still barred are dashed; lifts get a bar.
+    for (const e of floor.edges) {
+      const r = e.a, n = e.b;
+      if (!r.seen || !n.seen) continue;
+      const walked = r.visited || n.visited;
+      ctx.strokeStyle = e.gate && !e.gate.open ? '#6a5a3a' : walked ? '#6a6f80' : '#2e323c';
+      ctx.lineWidth = e.b.span || e.a.span ? 2 : 3;
+      ctx.setLineDash(e.gate && !e.gate.open ? [3, 3] : []);
+      ctx.beginPath();
+      ctx.moveTo(sx(r.ox), sy(r.oz));
+      ctx.lineTo(sx(n.ox), sy(n.oz));
+      ctx.stroke();
+      ctx.setLineDash([]);
+      if (e.lift) {
+        // A lift: a small square with an up/down tick.
+        const mx = sx((r.ox + n.ox) / 2), my = sy((r.oz + n.oz) / 2);
+        ctx.fillStyle = walked ? '#c9a45c' : '#5a4a2e';
+        ctx.fillRect(mx - 2.5, my - 2.5, 5, 5);
       }
     }
     const fills = { boss: '#3a0c0a', treasure: '#3a2c0c', shop: '#2a1a40', elite: '#3a220c' };
@@ -416,8 +422,15 @@ export class HUD {
       const x = Math.round(sx(r.ox) - room / 2), y = Math.round(sy(r.oz) - room / 2);
       if (x < -room || y < -room || x > W || y > H) continue;
       const special = fills[r.type];
-      ctx.fillStyle = r === current ? '#5a5a52' : special ? special : r.visited ? '#3a3e4a' : '#15171e';
+      // Higher tiers are drawn lighter, so the map reads as terrain.
+      const tier = [0, 10, 22, 34][Math.min(3, r.level)] ?? 0;
+      const lift = (hex) => `rgb(${hex.slice(1).match(/../g).map((c) => Math.min(255, parseInt(c, 16) + tier)).join(',')})`;
+      ctx.fillStyle = r === current ? '#5a5a52' : special ? special : lift(r.visited ? '#3a3e4a' : '#15171e');
       ctx.fillRect(x, y, room, room);
+      for (let i = 0; i < r.level; i++) {
+        ctx.fillStyle = '#8a8272';
+        ctx.fillRect(x + 2 + i * 3, y + room - 4, 2, 2);
+      }
       ctx.lineWidth = 1;
       ctx.strokeStyle = strokes[r.type] ?? (r.visited ? '#7d8599' : '#3a3f4c');
       ctx.strokeRect(x + 0.5, y + 0.5, room - 1, room - 1);
@@ -426,6 +439,24 @@ export class HUD {
       if (r.state === 'combat') {
         ctx.fillStyle = '#c42a1f';
         ctx.fillRect(x + room - 5, y + 2, 3, 3);
+      }
+    }
+    // Spans: a bright bar across the cell, above the chamber beneath.
+    for (const s of floor.spans.values()) {
+      if (!s.seen) continue;
+      const cx = sx(s.ox), cy = sy(s.oz);
+      const horiz = s.spanAxis === 'x';
+      ctx.fillStyle = s === current ? '#d8cfb8' : s.visited ? '#8a8e9a' : '#4a4e5a';
+      if (horiz) ctx.fillRect(cx - cell / 2, cy - 2, cell, 4);
+      else ctx.fillRect(cx - 2, cy - cell / 2, 4, cell);
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 1;
+      if (horiz) ctx.strokeRect(cx - cell / 2 + 0.5, cy - 2.5, cell - 1, 5);
+      else ctx.strokeRect(cx - 2.5, cy - cell / 2 + 0.5, 5, cell - 1);
+      if (s.lift) {
+        ctx.fillStyle = '#c9a45c';
+        const [lx, ly] = horiz ? [cx + s.liftSpot.x * scale, cy] : [cx, cy + s.liftSpot.z * scale];
+        ctx.fillRect(lx - 2, ly - 2, 4, 4);
       }
     }
     if (player) {

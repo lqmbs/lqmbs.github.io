@@ -388,6 +388,51 @@ Object.assign(COMBAT_LAYOUTS, {
 const GEO_OBELISK = new THREE.CylinderGeometry(0.25, 0.7, 1, 4).translate(0, 0.5, 0);
 
 export const SPECIAL_LAYOUTS = {
+  /**
+   * Span: a high bridge-hall crossing the cell far above another chamber — a fighting platform
+   * at its middle, lanterns and banners, chains hanging into the dark. A lift may be set into
+   * the bridge, dropping to the chamber below.
+   */
+  span(b, ch) {
+    ch.center = { x: 0, y: 0, z: 0 };
+    ch.enclosed = true;
+    const alongX = ch.spanAxis === 'x';
+    const map = (u, v) => (alongX ? [u, v] : [v, u]);
+    const w = rand(4.2, 5);
+    const lift = ch.liftAt;
+    const cuts = lift == null ? [] : [lift - 1.75, lift + 1.75];
+    const seg = (u0, u1) => { if (u1 - u0 > 0.4) b.bridge(...map(u0, 0), ...map(u1, 0), 0, w, { arches: false, tag: 'hub' }); };
+    if (lift == null) seg(-R + 1, R - 1);
+    else { seg(-R + 1, cuts[0] + 0.05); seg(cuts[1] - 0.05, R - 1); }
+    // The fighting platform in the middle, off to one side of the lift.
+    const pu0 = lift != null && lift > 0 ? -8 : lift != null ? cuts[1] + 0.2 : -6;
+    const pu1 = lift != null && lift > 0 ? cuts[0] - 0.2 : lift != null ? 8 : 6;
+    const pw = rand(8, 10);
+    b.platform(...map((pu0 + pu1) / 2, 0), ...(alongX ? [pu1 - pu0, pw] : [pw, pu1 - pu0]), 0, { depth: 3, corbels: false });
+    if (lift != null) {
+      // A stand-in where the lift car rests, so the balustrades leave the gap open.
+      b.world.addRect(...map(lift, 0), 1.7, 1.7, 0, { parapet: false, tag: 'liftstub', thick: 0.5 });
+      ch.reserved.push({ x: map(lift, 0)[0], z: map(lift, 0)[1], r: 2.6 });
+    }
+    for (let u = -R + 4; u < R - 3; u += 7) {
+      for (const s of [-1, 1]) {
+        const [x, z] = map(u, s * (w / 2 + 0.3));
+        if (Math.abs(u - (lift ?? 99)) < 3) continue;
+        b.chain(x, z, -0.4, -rand(8, 18));
+      }
+    }
+    for (const s of [-1, 1]) {
+      const [x, z] = map((pu0 + pu1) / 2 + s * ((pu1 - pu0) / 2 - 1.2), (pw / 2 - 1.2));
+      if (b.isFree(x, z, 0.6)) b.lanternPost(x, z, 0);
+      const [x2, z2] = map((pu0 + pu1) / 2 + s * ((pu1 - pu0) / 2 - 1.2), -(pw / 2 - 1.2));
+      if (b.isFree(x2, z2, 0.6)) b.brazier(x2, z2, 0);
+    }
+    for (let i = 0; i < 3; i++) {
+      const [x, z] = map(rand(-R + 4, R - 4), (Math.random() < 0.5 ? 1 : -1) * (w / 2 + 0.1));
+      b.banner(x, z, -0.3, alongX ? 0 : Math.PI / 2);
+    }
+  },
+
   /** The merchant's bazaar: rugs, a patched canopy, crates of curios and hanging lamps. */
   bazaar(b, ch) {
     ch.center = { x: 0, y: 0, z: 0 };

@@ -379,6 +379,16 @@ export class AudioEngine {
         for (let i = 0; i < 5; i++) this.tone({ t: i * 0.05, dur: 0.1, type: 'square', f: 1400 + i * 180, gain: 0.025 });
         this.metal(1200, 0.6, 0.04, 0.2);
         break;
+      case 'lift':
+        // Chains paying out and a grinding winch.
+        this.noise({ dur: 0.9, type: 'bandpass', f: 180, q: 3, gain: 0.18, attack: 0.1 });
+        for (let i = 0; i < 6; i++) this.noise({ t: i * 0.12, dur: 0.04, f: 2200, q: 8, gain: 0.05 });
+        this.metal(300, 0.6, 0.05);
+        break;
+      case 'lift-stop':
+        this.noise({ dur: 0.25, type: 'lowpass', f: 250, gain: 0.25 });
+        this.metal(220, 0.5, 0.06);
+        break;
       case 'portal':
         this.noise({ dur: 1.4, type: 'bandpass', f: 200, f2: 2600, q: 1.2, gain: 0.22, attack: 0.4 });
         this.tone({ dur: 1.4, type: 'sine', f: 90, f2: 30, gain: 0.15, attack: 0.2 });

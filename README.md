@@ -197,13 +197,21 @@ An expedition is three floors, each drawn from a different biome:
 | Old Imperial | Round | Banded drum columns with cushion capitals | Crenellated breastworks | Domes | Cloister (arcaded walks round a sunken garden), basilica (galleried arcades and an apse) |
 | Titan-Hewn | Corbelled | Stacked, askew monoliths | Standing stones | Stepped ziggurat crowns | Henge (rings of trilithons around an altar), ziggurat (a stepped temple mount) |
 
-**Floors are seamless.** A floor is an Isaac-style grid of chambers laid out as one continuous world. Neighbouring gatehouses are joined by real bridges and stairs, so you walk from chamber to chamber with no cut or fade. Neighbouring chambers stay visible through the fog, and the background, weather and abyss belong to the floor as a whole.
+**Floors are seamless.** A floor is one continuous world of chambers. Neighbouring gatehouses are joined by real bridges and stairs, so you walk from chamber to chamber with no cut or fade. Neighbouring chambers stay visible through the fog, and the background, weather and abyss belong to the floor as a whole.
+
+**Floors loop, climb and stack.** They are built like an interconnected castle rather than a corridor:
+
+- **Loops.** The paths between chambers close into rings, so there is usually another way round and rarely a long walk back. Only the guardian, the treasury and (usually) the merchant sit at dead ends.
+- **Tiers.** Chambers stand on different levels, 6 m apart. Passages climb between neighbouring tiers by stairs. Where the drop is too great, a high walk leads to a **lift**: an iron cage in a shaft that carries you when you step on and comes to you when you wait at an empty landing. Barriers close a landing while the car is away, so you can't step into an empty shaft. The guardian always waits a tier above the chamber that leads to it.
+- **Spans.** Some cells are stacked: a high **bridge-hall** crosses the cell far above the chamber below, with a fighting platform in its middle, and connects the chambers on either side. A lift set into the bridge drops straight down into the chamber beneath. Fall off a span and you land in the chamber below rather than the abyss.
+- **Shortcuts.** Some loop passages are barred by a portcullis with a lever on one side only, the side farther from the start. From the near side it "opens from the other side"; pull the lever on your way back and the loop is open for good.
+- **The citadel.** Beyond the guardian's arena rises the floor's citadel, a colossal keep on a crag crowned with spires and lit windows, with lava or water falling from it in those biomes. You can see it from anywhere on the floor, so you always know which way the guardian lies.
 
 **Encounters wake as you arrive.** Some foes wait in plain sight, slumped and still, and others claw out of the floor when you step into their chamber. A strike on a sleeping foe is a sneak attack and lands like a riposte. If you leave a chamber and get far away, its foes walk home and wait for you. Clearing a chamber raises a reward: a relic, a chest, or a scatter of coin.
 
 **Special chambers announce themselves from outside.** The guardian's gatehouse is hung with skulls, bone horns and crimson banners and lit by blood-red fire. The treasury's is gilded, with a golden crest and gold banners. The merchant's has a coin sign and violet lamps, and elite gates fly banners.
 
-**The map is true to scale.** Chambers are square cells joined by their passages. Your arrow shows your real position and heading and scrolls with you. The guardian (skull), treasury (crown), merchant (coin) and elite (diamond) rooms have their own icons and colours, and chambers still fighting are flagged.
+**The map is true to scale.** Chambers are square cells joined by their passages. Your arrow shows your real position and heading and scrolls with you. The guardian (skull), treasury (crown), merchant (coin) and elite (diamond) rooms have their own icons and colours, and chambers still fighting are flagged. Higher tiers are drawn lighter, with a pip per level. Spans are bright bars across their cells. Lifts are gold squares, and barred shortcuts are dashed until opened.
 
 **Only elite and guardian arenas seal.** A curtain of fog closes behind you there. An elite arena holds a *Champion* of the biome's signature breed (bigger, tougher, with a gold aura and a boss bar) and its retinue, and drops a rare weapon when cleared. The guardian's arena opens the descent to the next floor. Beating the third guardian ends the expedition and returns you to the Hold.
 
@@ -234,9 +242,10 @@ style.css         HUD, typography, CRT scanline overlay
 game.js           Game: loop, floor/chamber flow, combat feedback (hitstop, slow-mo, shake, sparks)
 src/config.js     Tunables, floor themes, directions, room states
 src/util.js       Math helpers, gothic arch geometry, GeoBatch (static-geometry merging)
-src/physics.js    World: walkable surfaces (rect/ramp/disc/ring/terrain), obstacles, slide-and-fall movement, per-chamber offsets
+src/physics.js    World: walkable surfaces (rect/ramp/disc/ring/terrain), obstacles, slide-and-fall movement, per-chamber offsets (including tier height)
 src/architecture.js  Builder: platforms, bridges, stairs, pillars, arcades, crystals, towers, parapets, vista
-src/floor.js      Seamless floor: grid generation, passages between chambers, vista, abyss, visibility
+src/floor.js      Seamless floor: looping, tiered, stacked generation; stair and lift passages; shortcuts; the citadel; vista, abyss, visibility
+src/lifts.js      Lifts (shared moving surfaces with landing barriers) and one-sided shortcut gates
 src/chamber.js    A chamber of a floor: gateways, fog walls, decoration, dormant encounters
 src/layouts.js    Chamber archetypes (gothic, imperial and titan-hewn) plus shrine, reliquary, bazaar and arena
 src/sky.js        Painterly sky dome
