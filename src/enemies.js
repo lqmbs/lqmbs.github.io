@@ -196,9 +196,14 @@ export class Enemy {
     this.posture = 0;
     this.postureCooldown = 0;
     this.chunkColor = cfg.chunkColor ?? 0xcfc6ad;
+    this.bloodColor = cfg.bloodColor ?? 0x4a0508;
+    this.hitReact = 0;
+    this.hitDir = new THREE.Vector3();
+    this.held = 0;
 
     this.group = new THREE.Group();
     this.group.position.set(x, y, z);
+    this.group.rotation.order = 'YXZ';
     this.pos = this.group.position;
     this.rig = new THREE.Group();
     this.group.add(this.rig);
@@ -438,6 +443,11 @@ export class Enemy {
     if (this.dead) return;
     this.hp -= amount;
     this.flash = 0.09;
+    // Reel from the blow: the whole body rocks away from it (heavier foes barely sway).
+    if (amount > 0.5 && dir.lengthSq() > 0) {
+      this.hitReact = Math.min(1.2, this.hitReact + 0.45 + knock * 0.06);
+      this.hitDir.copy(dir);
+    }
     this.barTimer = 4;
     this.vel.addScaledVector(dir, knock / this.mass);
     if (knock > 0) this.knockTimer = 0.3;
@@ -473,6 +483,11 @@ export class Enemy {
   update(dt) {
     if (this.dead) return;
     this.stateTime += dt;
+    // Pinned by an execution: frozen in whatever helpless state it was caught in.
+    if (this.held > 0) {
+      this.held -= dt;
+      this.stateTime = 0;
+    }
     this.knockTimer = Math.max(0, this.knockTimer - dt);
     this.postureCooldown -= dt;
     if (this.postureCooldown <= 0) this.posture = Math.max(0, this.posture - dt * 10);
@@ -514,7 +529,8 @@ export class Enemy {
     if (this.state === 'dormant') {
       this.brake(dt, 20);
       const ch = this.chamber;
-      if (this.wakeDelay === null && ch.state === 'combat' && this.game.room === ch && this.distToPlayer() < 22) this.wakeDelay = rand(0, 0.3);
+      if (this.held > 0) this.wakeDelay = null;
+      else if (this.wakeDelay === null && ch.state === 'combat' && this.game.room === ch && this.distToPlayer() < 22) this.wakeDelay = rand(0, 0.3);
       if (this.wakeDelay !== null) {
         this.wakeDelay -= dt;
         if (this.wakeDelay <= 0) {
@@ -591,7 +607,26 @@ export class Enemy {
       else m.emissive.setRGB(0, 0, 0);
     }
     this.animate(dt);
+    this.hitReact = Math.max(0, this.hitReact - dt * 5);
+    const hr = (this.hitReact * this.hitReact * 0.3) / Math.sqrt(Math.max(1, this.mass));
+    const sy = Math.sin(this.yaw), cy = Math.cos(this.yaw);
+    this.group.rotation.x = (this.hitDir.x * sy + this.hitDir.z * cy) * hr;
+    this.group.rotation.z = -(this.hitDir.x * cy - this.hitDir.z * sy) * hr;
     this.updateOverlay(dt);
+  }
+
+  /** Open to an execution: posture broken, or caught asleep. */
+  get executable() { return this.active && !this.dead && (this.state === 'broken' || this.asleep); }
+
+  /** The end of an execution: the blade comes out, and whatever survives reels. */
+  afterExecution() {
+    if (this.dead) return;
+    this.held = 0;
+    this.rig.position.y = 0;
+    this.rig.rotation.x = 0;
+    this.posture = 0;
+    this.setState('stagger');
+    this.staggerTime = 0.7;
   }
 
   /** States every enemy shares: blocking, staggered, posture-broken, flinching. */
@@ -820,7 +855,7 @@ export class Skeleton extends Enemy {
 
 export class Shade extends Enemy {
   constructor(game, chamber, x, y, z) {
-    super(game, chamber, x, y, z, { name: 'Shade', hp: 24, radius: 0.45, height: 2.0, mass: 0.7, chunkColor: 0x151020, postureMax: 30, parryPosture: 40 });
+    super(game, chamber, x, y, z, { name: 'Shade', hp: 24, radius: 0.45, height: 2.0, mass: 0.7, chunkColor: 0x151020, bloodColor: 0x241036, postureMax: 30, parryPosture: 40 });
     const robe = this.mat(0x0c0a14, { emissive: 0x140a26 });
     this.eyeMat = new THREE.MeshBasicMaterial({ color: 0xc8a8ff, fog: false });
     this.body = new THREE.Group();
@@ -937,7 +972,7 @@ export class Shade extends Enemy {
 
 export class Acolyte extends Enemy {
   constructor(game, chamber, x, y, z) {
-    super(game, chamber, x, y, z, { name: 'Lumen Acolyte', hp: 26, radius: 0.45, height: 2.0, chunkColor: 0x3a4460, postureMax: 30, parryPosture: 30 });
+    super(game, chamber, x, y, z, { name: 'Lumen Acolyte', hp: 26, radius: 0.45, height: 2.0, chunkColor: 0x3a4460, bloodColor: 0x301a3a, postureMax: 30, parryPosture: 30 });
     const color = game.theme.crystal;
     const robe = this.mat(0x1c2230);
     const trim = this.mat(0x3a3020);
@@ -1374,7 +1409,7 @@ export function eliteGroup(biome, depth) {
 
 export class TrainingDummy extends Enemy {
   constructor(game, area, x, y, z, yaw = 0) {
-    super(game, area, x, y, z, { name: 'Training Dummy', hp: 400, radius: 0.45, height: 1.9, mass: 60, postureMax: 60, parryPosture: 0, chunkColor: 0x8a6a3a, brokenTime: 2.5 });
+    super(game, area, x, y, z, { name: 'Training Dummy', hp: 400, radius: 0.45, height: 1.9, mass: 60, postureMax: 60, parryPosture: 0, chunkColor: 0x8a6a3a, bloodColor: 0x6a5a38, brokenTime: 2.5 });
     const wood = this.mat(0x4a3424);
     const straw = this.mat(0x9a8248);
     const cloth = this.mat(0x5a2a24);
@@ -1470,7 +1505,7 @@ export const ENEMY_TYPES = {
 
 export class EmberHound extends Enemy {
   constructor(game, chamber, x, y, z) {
-    super(game, chamber, x, y, z, { name: 'Ember Hound', hp: 34, radius: 0.5, height: 1.2, mass: 0.8, chunkColor: 0x2a1a14, postureMax: 40, parryPosture: 40 });
+    super(game, chamber, x, y, z, { name: 'Ember Hound', hp: 34, radius: 0.5, height: 1.2, mass: 0.8, chunkColor: 0x2a1a14, bloodColor: 0x3a0e02, postureMax: 40, parryPosture: 40 });
     const hide = this.mat(0x2a1e1a);
     const bone = this.mat(0x4a3a30);
     this.emberMat = new THREE.MeshBasicMaterial({ color: 0xff7a20, fog: false });
@@ -1585,7 +1620,7 @@ export class EmberHound extends Enemy {
 export class Drowned extends Enemy {
   constructor(game, chamber, x, y, z) {
     super(game, chamber, x, y, z, {
-      name: 'Drowned', hp: 120, radius: 0.75, height: 2.5, mass: 3, chunkColor: 0x5a6a5a,
+      name: 'Drowned', hp: 120, radius: 0.75, height: 2.5, mass: 3, chunkColor: 0x5a6a5a, bloodColor: 0x1e2e1a,
       postureMax: 110, parryPosture: 34, interruptOnParry: false, brokenTime: 2.4,
     });
     const flesh = this.mat(0x6a7a6a);
@@ -1705,7 +1740,7 @@ export class Drowned extends Enemy {
 
 export class Gargoyle extends Enemy {
   constructor(game, chamber, x, y, z) {
-    super(game, chamber, x, y, z, { name: 'Gargoyle', hp: 55, radius: 0.6, height: 2.2, mass: 1.5, chunkColor: 0x8a8478, postureMax: 60, parryPosture: 35 });
+    super(game, chamber, x, y, z, { name: 'Gargoyle', hp: 55, radius: 0.6, height: 2.2, mass: 1.5, chunkColor: 0x8a8478, bloodColor: 0x44424a, postureMax: 60, parryPosture: 35 });
     const stone = this.mat(0x8a8478);
     const dark = this.mat(0x5a564e);
     this.eyeMat = new THREE.MeshBasicMaterial({ color: this.biome?.eyes ?? 0xff4a20, fog: false });

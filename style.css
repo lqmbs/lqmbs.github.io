@@ -830,3 +830,27 @@ kbd {
 .slot.art.ready .art-gem { opacity: 1; }
 .slot.art .slot-name { padding-top: 24px; position: relative; }
 .slot.art.denied { animation: drained 0.35s ease; }
+
+/* Callouts: executions, perfect dodges, deflect chains. */
+#callout {
+  position: absolute; left: 50%; top: 58%; transform: translate(-50%, 0); pointer-events: none;
+  font-family: var(--font-title); letter-spacing: 0.35em; text-transform: uppercase; font-size: 15px;
+  color: var(--bone); text-shadow: 0 0 10px rgba(0, 0, 0, 0.9), 0 1px 2px #000; opacity: 0; white-space: nowrap;
+}
+#callout.gold { color: var(--gold); text-shadow: 0 0 14px rgba(201, 164, 92, 0.6), 0 1px 2px #000; }
+#callout.blood { color: var(--blood-bright); font-size: 20px; text-shadow: 0 0 16px rgba(196, 42, 31, 0.6), 0 1px 3px #000; }
+#callout.blue { color: #b8ccff; text-shadow: 0 0 16px rgba(120, 150, 255, 0.6), 0 1px 3px #000; }
+#callout.show { animation: callout 1.3s ease-out forwards; }
+@keyframes callout {
+  0% { opacity: 0; transform: translate(-50%, 6px) scale(1.25); letter-spacing: 0.6em; }
+  12% { opacity: 1; transform: translate(-50%, 0) scale(1); letter-spacing: 0.35em; }
+  70% { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%, -8px); }
+}
+/* Executions: quick letterbox bars close in. */
+#exec-bars::before, #exec-bars::after {
+  content: ''; position: fixed; left: 0; right: 0; height: 0; background: #000; transition: height 0.15s ease-out; pointer-events: none; z-index: 1;
+}
+#exec-bars::before { top: 0; }
+#exec-bars::after { bottom: 0; }
+#hud.executing #exec-bars::before, #hud.executing #exec-bars::after { height: 8vh; }

@@ -16,7 +16,8 @@ import { WeaponDrop } from './src/loot.js';
 import { rollWeapon } from './src/weapons.js';
 import { CLASSES } from './src/classes.js';
 import { Settings } from './src/settings.js';
-import { Sunfall } from './src/builds.js';
+import { Sunfall, Shockwave } from './src/builds.js';
+import { Gore } from './src/gore.js';
 import { Pickup, dropCoins } from './src/pickups.js';
 import { DealRealm } from './src/realm.js';
 import { Cutscene } from './src/cutscene.js';
@@ -42,6 +43,11 @@ class Game {
     this.lanternScale = 1;
     this.menuOpen = false;
     this.shakeOffset = new THREE.Vector3();
+    this.impact = 0;
+    this.focusFx = 0;
+    this.fovKick = 0;
+    this.parryChain = 0;
+    this.lastParryAt = -10;
     this.transition = null;
     this.effects = [];
     this.bolts = [];
@@ -56,6 +62,7 @@ class Game {
     this.menus = new Menus(this);
     this.particles = new ParticleSystem(this.scene, 700, false);
     this.glow = new ParticleSystem(this.scene, 900, true);
+    this.gore = new Gore(this);
     this.initLights();
     this.initMist();
 
@@ -353,6 +360,7 @@ class Game {
     this.biome = null;
     if (resetLoadout) this.player.resetLoadout();
     this.hub.build();
+    this.gore.clear();
     this.setEnvironment('hub');
     this.hud.setFloor(null, this.hub.name);
     this.hud.setMinimapVisible(false);
@@ -388,6 +396,7 @@ class Game {
     this.biome = BIOMES[this.runBiomes?.[this.depth - 1] ?? pick(Object.keys(BIOMES))];
     const style = ARCH_STYLES[this.runStyles?.[(this.depth - 1) % 3] ?? pick(Object.keys(ARCH_STYLES))];
     this.floor = new DungeonFloor(this, this.depth, this.biome, style);
+    this.gore.clear();
     this.setEnvironment('depths');
     this.floor.build();
     const name = `${this.biome.name}`;
@@ -801,6 +810,119 @@ class Game {
     }
   }
 
+  // ---- Executions, dodges, charged blows, plunges -------------------------------------
+
+  onExecutionStart(p, e) {
+    this.audio.play('execute-draw');
+    this.hud.root.classList.add('executing');
+    this.hud.callout(e.asleep ? 'Assassinate' : 'Execution', 'blood');
+  }
+
+  onExecutionStrike(p, e, dmg, dir) {
+    const c = e.pos.clone();
+    c.y += e.height * 0.6;
+    this.audio.play('execute');
+    this.hitstop = Math.max(this.hitstop, 0.2);
+    this.slowmo = Math.max(this.slowmo, 0.35);
+    this.shake(0.55);
+    this.flash = 0.35;
+    this.hurtFlash = Math.max(this.hurtFlash, 0.25);
+    this.impact = 1;
+    this.fovKick = -8;
+    p.viewmodel.kick(0.7);
+    p.fx.onHit(e, dmg, 'riposte');
+    p.addUltCharge(dmg * 0.15);
+    this.hud.damageNumber(c, dmg, 'crit');
+    this.gore.spray(e.pos, dir, 2.2, e.bloodColor, e.chamber.world);
+    this.particles.burst(c, 34, () => ({
+      vel: new THREE.Vector3(dir.x * rand(2, 7) + rand(-2, 2), rand(0.5, 5), dir.z * rand(2, 7) + rand(-2, 2)), life: rand(0.5, 1.2), size: rand(0.04, 0.1), color: e.bloodColor, gravity: 14, floor: e.pos.y,
+    }));
+    this.sparks(c, 20, 0xff4020, 5);
+  }
+
+  onExecutionRip(p, e, dir) {
+    const c = e.pos.clone();
+    c.y += e.height * 0.55;
+    this.audio.play('execute-rip');
+    this.shake(0.3);
+    this.hitstop = Math.max(this.hitstop, 0.06);
+    const back = dir.clone().negate();
+    this.particles.burst(c, 22, () => ({
+      vel: new THREE.Vector3(back.x * rand(2, 5) + rand(-1.5, 1.5), rand(1, 4), back.z * rand(2, 5) + rand(-1.5, 1.5)), life: rand(0.5, 1.1), size: rand(0.04, 0.09), color: e.bloodColor, gravity: 14, floor: e.pos.y,
+    }));
+    this.gore.spray(p.pos, back, 1, e.bloodColor, e.chamber.world);
+  }
+
+  onExecutionEnd() {
+    this.hud.root.classList.remove('executing');
+  }
+
+  onDodge(p) {
+    this.impact = Math.max(this.impact, 0.25);
+    const from = p.pos.clone().setY(p.pos.y + 1);
+    this.glow.burst(from, 10, () => ({
+      vel: new THREE.Vector3(-p.skillDir.x * rand(2, 5), rand(-0.5, 0.5), -p.skillDir.z * rand(2, 5)), life: rand(0.15, 0.35), size: 0.03, color: 0xb8c8ff, drag: 5,
+    }));
+  }
+
+  /** Slipped a blow at the last instant: time slows, and a ghost of you takes the hit. */
+  onPerfectDodge(attacker) {
+    const p = this.player;
+    this.slowmo = Math.max(this.slowmo, 0.9);
+    this.impact = Math.max(this.impact, 0.7);
+    this.audio.play('perfect-dodge');
+    this.hud.callout('Perfect Dodge', 'blue');
+    p.stamina = Math.min(p.stats.maxStamina, p.stamina + 30);
+    p.addUltCharge(10);
+    this.addEffect(new Afterimage(this, p.pos.clone().addScaledVector(p.skillDir, -1.2), p.yaw));
+  }
+
+  onChargeFull(p) {
+    this.audio.play('charge-full');
+    const tip = p.eyePosition.addScaledVector(p.forward, 0.6).add(new THREE.Vector3(0, 0.1, 0));
+    this.glow.burst(tip, 18, () => ({
+      vel: new THREE.Vector3(rand(-1.5, 1.5), rand(-0.5, 2), rand(-1.5, 1.5)), life: rand(0.2, 0.5), size: 0.04, color: p.weapon.rarity.color || 0xffe0b0, drag: 4,
+    }));
+    this.flash = Math.max(this.flash, 0.2);
+  }
+
+  /** A fully charged swing looses a crescent of force along the cut. */
+  chargedRelease(p) {
+    const at = p.pos.clone().addScaledVector(p.forward, 2.2);
+    this.addEffect(new Shockwave(this, at, 3.2, p.weapon.rarity.color || 0xffe0a0, 0.3));
+    this.shake(0.3);
+    this.impact = Math.max(this.impact, 0.5);
+  }
+
+  /** Landing a plunging attack: a crater of force, harder the further you fell. */
+  plungeImpact(p, height) {
+    const S = p.stats;
+    const radius = 2.6 + Math.min(2, height * 0.15);
+    const power = 1.4 + Math.min(3, height * 0.18);
+    this.addEffect(new Shockwave(this, p.pos, radius + 1.5, 0xffd8a0, 0.45));
+    this.addEffect(new Shockwave(this, p.pos, radius * 0.6, 0xffffff, 0.25));
+    this.audio.play('plunge');
+    this.shake(0.5 + Math.min(0.4, height * 0.03));
+    this.hitstop = Math.max(this.hitstop, 0.1);
+    this.impact = Math.max(this.impact, 0.8);
+    this.fovKick = -6;
+    this.particles.burst(p.pos.clone().setY(p.pos.y + 0.1), 30, () => ({
+      vel: new THREE.Vector3(rand(-6, 6), rand(1, 4), rand(-6, 6)), life: rand(0.5, 1.2), size: rand(0.05, 0.14), color: 0x5a5448, gravity: 12, floor: p.pos.y, linger: true,
+    }));
+    for (const e of this.nearbyEnemies()) {
+      if (!e.active) continue;
+      const dx = e.pos.x - p.pos.x, dz = e.pos.z - p.pos.z;
+      const d = Math.hypot(dx, dz);
+      if (d - e.radius > radius || Math.abs(e.pos.y - p.pos.y) > 1.6) continue;
+      const dir = new THREE.Vector3(dx / (d || 1), 0, dz / (d || 1));
+      const direct = d - e.radius < 1.2;
+      const dmg = p.weapon.damage * S.damageMult * p.fx.damageBonus() * power * (direct ? 1.5 : 1);
+      e.takeRawDamage(dmg, dir, 9 / Math.max(1, e.mass * 0.6));
+      if (e.alive && !e.addPosture(direct ? 70 : 40) && !e.isBoss) e.stun(0.8);
+      this.onEnemyHit(e, e.alive ? (direct ? 'riposte' : 'bash') : 'kill', dir, dmg);
+    }
+  }
+
   onFlaskDrunk() {
     this.audio.play('heal');
     this.flash = 0.25;
@@ -862,6 +984,24 @@ class Game {
         this.shake(p.weapon.kind === 'heavy' ? 0.3 : 0.15);
     }
     if (dmg > 0) this.hud.damageNumber(c, dmg, result === 'riposte' ? 'crit' : 'normal');
+    if (dmg > 0 && result !== 'spell') {
+      // Wounds bleed: a spurt from the cut and a stain on the stones beneath.
+      const heavy = result === 'riposte' || p.chargeK > 0.5;
+      this.gore.spray(enemy.pos, dir, heavy ? 1.6 : 0.6, enemy.bloodColor, enemy.chamber.world);
+      this.particles.burst(c, heavy ? 18 : 8, () => ({
+        vel: new THREE.Vector3(dir.x * rand(1.5, 5) + rand(-1, 1), rand(0.5, 3.5), dir.z * rand(1.5, 5) + rand(-1, 1)), life: rand(0.4, 0.9), size: rand(0.03, 0.07), color: enemy.bloodColor, gravity: 14, floor: enemy.pos.y,
+      }));
+    }
+    if (p.chargeK > 0.5 && result !== 'blocked') {
+      this.hitstop = Math.max(this.hitstop, 0.08 + p.chargeK * 0.08);
+      this.shake(0.25 + p.chargeK * 0.25);
+      this.impact = Math.max(this.impact, 0.4 * p.chargeK);
+      this.fovKick = Math.min(this.fovKick, -3 * p.chargeK);
+    }
+    if (result === 'riposte') {
+      this.impact = Math.max(this.impact, 0.55);
+      this.fovKick = Math.min(this.fovKick, -4);
+    }
     const leech = p.stats.lifesteal + (result === 'spell' ? 0 : p.weapon.lifesteal || 0);
     if (leech > 0) p.hp = Math.min(p.stats.maxHp, p.hp + leech);
     this.particles.burst(c, 6, () => ({
@@ -875,14 +1015,29 @@ class Game {
   guardFeedback(result) {
     const gp = this.guardPoint();
     switch (result) {
-      case 'parried':
+      case 'parried': {
         this.audio.play('parry');
         this.sparks(gp, 28, 0xfff0c0, 6);
         this.hitstop = Math.max(this.hitstop, 0.1);
         this.shake(0.25);
         this.flash = 0.7;
+        this.impact = Math.max(this.impact, 0.45);
+        this.fovKick = Math.min(this.fovKick, -3);
         this.hud.parryFlash();
+        // Deflections in quick succession build a chain; the third bends time.
+        this.parryChain = this.time - this.lastParryAt < 1.8 ? this.parryChain + 1 : 1;
+        this.lastParryAt = this.time;
+        if (this.parryChain >= 2) {
+          this.audio.play('parry-chain', this.parryChain);
+          this.hud.callout(`Deflect ×${this.parryChain}`, this.parryChain >= 3 ? 'gold' : '');
+          this.player.addUltCharge(4 * this.parryChain);
+        }
+        if (this.parryChain >= 3) {
+          this.slowmo = Math.max(this.slowmo, 0.5);
+          this.sparks(gp, 40, 0xffd060, 8);
+        }
         break;
+      }
       case 'blocked':
         this.audio.play(this.player.offhand === 'shield' ? 'shield-block' : 'block');
         this.sparks(gp, 10, 0xffb060, 3);
@@ -916,7 +1071,10 @@ class Game {
   }
 
   onEnemyKilled(enemy, fell) {
-    if (!fell) this.hitstop = Math.max(this.hitstop, 0.08);
+    if (!fell) {
+      this.hitstop = Math.max(this.hitstop, 0.08);
+      this.gore.splat(enemy.pos, 1.3 + enemy.radius * 1.5, enemy.bloodColor, enemy.chamber.world);
+    }
     this.shake(0.2);
     const S = this.player.stats;
     if (S.lifesteal > 0) this.player.hp = Math.min(S.maxHp, this.player.hp + S.lifesteal * 2);
@@ -1085,6 +1243,7 @@ class Game {
     this.effects = this.effects.filter((e) => e.update(dt));
     this.bolts = this.bolts.filter((b) => b.update(dt));
     this.particles.update(dt);
+    this.gore.update(dt);
     this.glow.update(dt);
     this.updateAmbience(dt, realDt);
     this.audio.update(realDt);
@@ -1106,7 +1265,7 @@ class Game {
         if (it.touching?.(p) && Math.abs(angleDiff(p.yaw, yawOf(it.dir.x, it.dir.z))) < 1.1) { p.climb(it); return; }
       }
     }
-    if (p.state === 'climb') { this.hud.setPrompt(null); return; }
+    if (p.state === 'climb' || p.state === 'execute' || p.state === 'mantle') { this.hud.setPrompt(null); return; }
     this.focus = this.findFocus();
     this.hud.setPrompt(this.focus);
     if (input.wasPressed('KeyE') && this.focus && ['idle', 'guard', 'swap'].includes(p.state)) this.focus.interact();
@@ -1158,6 +1317,9 @@ class Game {
     }
     this.hurtFlash = Math.max(0, this.hurtFlash - realDt * 2.5);
     this.flash = Math.max(0, this.flash - realDt * 3);
+    this.impact = Math.max(0, this.impact - realDt * 3.2);
+    this.fovKick = damp(this.fovKick, 0, 7, realDt);
+    this.focusFx = damp(this.focusFx, this.slowmo > 0 || this.player.state === 'execute' ? 1 : 0, this.slowmo > 0 ? 12 : 4, realDt);
   }
 
   render() {
@@ -1167,7 +1329,48 @@ class Game {
     u.hurt.value = Math.max(this.hurtFlash, p.alive ? clamp(1 - p.hp / p.stats.maxHp - 0.6, 0, 0.4) : 0.5);
     u.flash.value = this.flash;
     u.fade.value = this.fade;
+    u.impact.value = this.impact;
+    u.focus.value = this.focusFx;
     this.post.render(this.scene, this.camera, p.viewmodel.scene, p.viewmodel.camera);
+  }
+}
+
+/** A pale ghost of the knight left where a blow was slipped; it takes the hit and fades. */
+class Afterimage {
+  constructor(game, pos, yaw) {
+    this.game = game;
+    this.t = 0;
+    const mat = new THREE.MeshBasicMaterial({ color: 0x9ab8ff, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false });
+    this.mat = mat;
+    const g = (this.group = new THREE.Group());
+    const add = (w, h, d, x, y, z) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); m.position.set(x, y, z); g.add(m); };
+    add(0.5, 0.75, 0.3, 0, 1.15, 0);
+    add(0.26, 0.28, 0.26, 0, 1.68, 0);
+    add(0.18, 0.8, 0.18, -0.13, 0.4, 0);
+    add(0.18, 0.8, 0.18, 0.13, 0.4, 0);
+    add(0.14, 0.7, 0.14, -0.36, 1.15, 0);
+    add(0.14, 0.7, 0.14, 0.36, 1.15, 0);
+    g.position.copy(pos);
+    g.rotation.y = yaw;
+    game.scene.add(g);
+  }
+
+  update(dt) {
+    this.t += dt;
+    this.mat.opacity = 0.5 * Math.max(0, 1 - this.t / 0.8);
+    this.group.scale.setScalar(1 + this.t * 0.25);
+    this.group.position.y += dt * 0.3;
+    if (this.t > 0.8) {
+      this.dispose();
+      return false;
+    }
+    return true;
+  }
+
+  dispose() {
+    this.game.scene.remove(this.group);
+    this.group.traverse((o) => o.geometry?.dispose());
+    this.mat.dispose();
   }
 }
 

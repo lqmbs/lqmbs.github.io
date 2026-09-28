@@ -24,8 +24,9 @@ GitHub Pages also works if you point it at the repository root. Clicking **Enter
 | `W A S D` | Move |
 | Mouse | Look |
 | `Shift` | Sprint (drains stamina) |
-| `Space` | Jump |
-| Left click | Attack, or cast with a wand or staff (animation-locked; clicks chain) |
+| `Space` | Jump. Jump at a ledge within reach (about 2 m) to haul yourself up; in the air, holding `W` grabs any edge ahead |
+| `C` | Dodge, with brief invulnerability. At a sprint: slide |
+| Left click | Attack, or cast with a wand or staff (animation-locked; clicks chain). Hold to charge. Attack a posture-broken or sleeping foe to execute it; attack while falling to plunge |
 | Right click (hold) | Guard |
 | `Q` | Class skill |
 | `R` | Ultimate (when charged) |
@@ -163,6 +164,13 @@ Alongside the stat relics, many change how you fight:
 - **Tells.** A white **gleam** on a weapon means the attack can be parried. A **red glow**, together with the *Perilous* warning and a low chime, means it can't: step out of the way instead.
 - **Posture.** Heavy enemies and guardians have posture (the gold bar under a boss's health). Parries and hits fill it, and a full bar breaks them open for a devastating riposte.
 - **Enemy blocks.** Skeletons and knights sometimes block your swings, which knocks your sword back.
+- **Executions.** Attack a foe whose posture is broken (or one still asleep) from close in front and you finish it by hand. The camera closes in, letterbox bars drop, and the blade goes in for about 2.4× riposte damage. Then you wrench it free. Bosses take less but still reel.
+- **Charged blows.** Hold attack through the wind-up to gather the swing. It deals up to 2.1× damage and 2.6× posture with longer reach. At full charge, the blade flares and the swing looses a crescent of force.
+- **Deflect chains.** Parries within 1.8 s of each other chain, each ringing a step higher and feeding your ultimate. The third bends time.
+- **Dodge and perfect dodge.** `C` dashes in your move direction (backwards by default) with about 0.2 s of invulnerability. A blow that lands inside that window is a *perfect dodge*: time slows, a pale afterimage takes the hit, and you get stamina and ultimate charge back.
+- **Slide.** Dodge at a sprint to slide, low and fast. Jump out of it to keep the momentum, or attack out of it for a strike that deals double posture damage.
+- **Plunging attacks.** Attack while falling from more than about 1.6 m to drive the blade down. The impact damages everything around you, harder the further you fell. Whatever is directly beneath takes a riposte-strength blow.
+- **Blood.** Wounds spray and stain the stones in each creature's own colour: red, ghostly violet, drowned green, stone dust. Stains fade over about a minute.
 - **The abyss.** Knockback can throw enemies off ledges. You can fall too, which costs 20% of your health and returns you to the gate you came in by.
 
 ### Enemies
@@ -246,6 +254,7 @@ src/util.js       Math helpers, gothic arch geometry, GeoBatch (static-geometry 
 src/physics.js    World: walkable surfaces (rect/ramp/disc/ring/terrain), obstacles, slide-and-fall movement, per-chamber offsets (including tier height)
 src/architecture.js  Builder: platforms, bridges, stairs, pillars, arcades, crystals, towers, parapets, vista
 src/floor.js      Seamless floor: looping, tiered, stacked generation; stair and lift passages; shortcuts; the citadel; vista, abyss, visibility
+src/gore.js       Pooled blood stains on the ground
 src/lifts.js      Lifts (shared moving surfaces with landing fences) and one-sided shortcut gates
 src/ladders.js    Reachability analysis that finds inescapable pits, and the climbable ladders placed in them
 src/chamber.js    A chamber of a floor: gateways, fog walls, decoration, dormant encounters

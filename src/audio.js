@@ -127,9 +127,59 @@ export class AudioEngine {
     }
   }
 
-  play(name) {
+  play(name, arg = 0) {
     if (!this.ctx || this.muted) return;
     switch (name) {
+      case 'charge':
+        this.noise({ dur: 0.75, type: 'bandpass', f: 300, f2: 1400, q: 3, gain: 0.12, attack: 0.3 });
+        this.tone({ dur: 0.75, type: 'sawtooth', f: 55, f2: 82, gain: 0.06, attack: 0.3 });
+        break;
+      case 'charge-full':
+        this.metal(1480, 0.7, 0.07);
+        this.tone({ dur: 0.4, type: 'triangle', f: 880, f2: 1320, gain: 0.05, attack: 0.01 });
+        break;
+      case 'execute-draw':
+        this.noise({ dur: 0.3, f: 900, f2: 3200, q: 2, gain: 0.18, attack: 0.05 });
+        this.tone({ dur: 0.9, type: 'sawtooth', f: 41, gain: 0.15, attack: 0.05 });
+        break;
+      case 'execute':
+        // Steel through meat: a wet thump, a crunch, a long low ring.
+        this.tone({ dur: 0.6, f: 90, f2: 30, gain: 1.0 });
+        this.noise({ dur: 0.18, type: 'lowpass', f: 900, f2: 200, gain: 0.9 });
+        for (let i = 0; i < 4; i++) this.noise({ t: 0.02 + i * 0.025, dur: 0.04, type: 'bandpass', f: rand(600, 1400), q: 4, gain: 0.35 });
+        this.metal(310, 1.6, 0.08, 0.03);
+        this.tone({ t: 0.05, dur: 1.4, type: 'sine', f: 58, gain: 0.35, attack: 0.02 });
+        break;
+      case 'execute-rip':
+        this.noise({ dur: 0.35, type: 'bandpass', f: 500, f2: 1800, q: 2.5, gain: 0.5 });
+        this.noise({ t: 0.05, dur: 0.3, type: 'lowpass', f: 700, f2: 150, gain: 0.5 });
+        break;
+      case 'perfect-dodge':
+        this.tone({ dur: 0.9, type: 'sine', f: 1760, f2: 440, gain: 0.08, attack: 0.01 });
+        this.noise({ dur: 0.5, type: 'highpass', f: 3000, f2: 800, gain: 0.15 });
+        this.tone({ dur: 1.2, type: 'sine', f: 110, f2: 55, gain: 0.3 });
+        break;
+      case 'parry-chain': {
+        // Each deflection in a chain rings a step higher.
+        const f = 523.3 * Math.pow(2, Math.min(arg, 7) * 2 / 12);
+        this.tone({ dur: 1.4, type: 'sine', f, gain: 0.08 });
+        this.tone({ dur: 1.2, type: 'triangle', f: f * 1.5, gain: 0.04 });
+        break;
+      }
+      case 'slide':
+        this.noise({ dur: 0.7, type: 'lowpass', f: 1400, f2: 300, gain: 0.35, attack: 0.02 });
+        this.noise({ dur: 0.5, type: 'bandpass', f: 3000, q: 1.5, gain: 0.06 });
+        break;
+      case 'mantle':
+        this.noise({ dur: 0.12, type: 'lowpass', f: 700, gain: 0.4 });
+        this.noise({ t: 0.08, dur: 0.25, type: 'bandpass', f: 1200, f2: 600, q: 1.5, gain: 0.15 });
+        break;
+      case 'plunge':
+        this.tone({ dur: 0.9, f: 60, f2: 24, gain: 1.0 });
+        this.noise({ dur: 0.7, type: 'lowpass', f: 500, f2: 60, gain: 0.9 });
+        this.metal(200, 1.0, 0.1, 0.01);
+        for (let i = 0; i < 6; i++) this.noise({ t: 0.05 + i * 0.05, dur: 0.06, type: 'bandpass', f: rand(300, 900), q: 3, gain: 0.2 });
+        break;
       case 'swing':
         this.noise({ dur: 0.16, f: 2400, f2: 500, q: 1.4, gain: 0.32 });
         break;

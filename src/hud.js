@@ -27,6 +27,13 @@ export class HUD {
     this.bannerText = $('#banner .banner-text');
     this.itemBanner = $('#item-banner');
     this.crosshair = $('#crosshair');
+    // A short word under the crosshair for the moments that matter: executions, perfect dodges.
+    this.calloutEl = document.createElement('div');
+    this.calloutEl.id = 'callout';
+    this.root.appendChild(this.calloutEl);
+    this.bars = document.createElement('div');
+    this.bars.id = 'exec-bars';
+    this.root.appendChild(this.bars);
     this.perilousEl = $('#perilous');
     this.minimap = $('#minimap');
     this.mctx = this.minimap.getContext('2d');
@@ -225,6 +232,12 @@ export class HUD {
 
   flashStamina() { this.pulse(this.stBar, 'drained'); }
   parryFlash() { this.pulse(this.crosshair, 'parried'); }
+
+  callout(text, cls = '') {
+    this.calloutEl.textContent = text;
+    this.calloutEl.className = cls;
+    this.pulse(this.calloutEl, 'show');
+  }
 
   perilous() {
     this.perilousTimer = 0.9;

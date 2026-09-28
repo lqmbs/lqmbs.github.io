@@ -6,6 +6,7 @@ import { makeWeapon, buildWeaponModel, buildShieldModel, weaponMaterials } from 
 import { BuildFX, Shockwave } from './builds.js';
 import { GroundTelegraph } from './enemies.js';
 import { StaffArts, Restage, Summoner } from './abilities.js';
+import { STEP_HEIGHT } from './physics.js';
 
 const _fwd = new THREE.Vector3();
 const _right = new THREE.Vector3();
@@ -115,6 +116,10 @@ export class Player {
     this.streakTimer = 0;
     this.hidden = false;
     this.hideTimer = 0;
+    this.chargeK = 0;
+    this.crouchK = 0;
+    this.fovOffset = 0;
+    this.dodgeCd = 0;
     this.arts.cd = [0, 0];
     this.restage.log.length = 0;
     this.restage.queue.length = 0;
@@ -231,7 +236,10 @@ export class Player {
     return this.state === 'guard' && this.parryEligible && this.stateTime <= this.parryWindow;
   }
 
-  dodging() { return this.state === 'skill' && this.skillId === 'sidestep' && this.stateTime < 0.24; }
+  dodging() {
+    return (this.state === 'skill' && this.skillId === 'sidestep' && this.stateTime < 0.24)
+      || (this.state === 'dodge' && this.stateTime < 0.22);
+  }
 
   facing(pos, maxAngle = 1.3) {
     const dx = pos.x - this.pos.x, dz = pos.z - this.pos.z;
@@ -243,7 +251,15 @@ export class Player {
    * `perilous` attacks ignore guard entirely — you must step out of the way.
    */
   receiveAttack(attacker, { damage, perilous = false, from }) {
-    if (!this.alive || this.invuln > 0 || this.game.transition || this.dodging() || this.game.state === 'shop') return 'miss';
+    if (this.dodging() && this.alive && !this.game.transition) {
+      // Slipped it by a hair: time slows, and the blow meets a fading afterimage.
+      if (!this.perfectDodged) {
+        this.perfectDodged = true;
+        this.game.onPerfectDodge(attacker);
+      }
+      return 'miss';
+    }
+    if (!this.alive || this.invuln > 0 || this.game.transition || this.game.state === 'shop') return 'miss';
     const src = from || attacker.pos;
     if (!perilous && this.state === 'guard' && this.facing(src)) {
       if (this.inParryWindow()) {
@@ -330,7 +346,14 @@ export class Player {
   }
 
   tryAttack() {
+    const ex = this.findExecutionTarget();
+    if (ex) return this.startExecution(ex);
+    if (!this.grounded && this.canPlunge()) return this.startPlunge();
     if (!this.spendStamina(this.weapon.cost)) return false;
+    this.slideStrike = this.state === 'slide';
+    this.chargeK = 0;
+    this.chargeFull = false;
+    this.noCharge = false;
     this.comboSide *= -1;
     this.hitSet.clear();
     this.slashed = false;
@@ -344,6 +367,13 @@ export class Player {
     const input = this.game.input;
     const w = this.weapon;
     if (t < windup) return;
+    // Hold the button through the wind-up to charge the blow instead.
+    if (!this.slashed && w.kind !== 'cast' && input.lmb && !this.noCharge) {
+      if (t < 0.2) return;
+      this.setState('charge');
+      this.game.audio.play('charge');
+      return;
+    }
     if (t < windup + active) {
       if (!this.slashed) {
         this.slashed = true;
@@ -359,10 +389,11 @@ export class Player {
             this.game.hud.flashMana();
           }
         } else {
-          this.game.audio.play(w.kind === 'heavy' ? 'swing-heavy' : 'swing');
+          this.game.audio.play(w.kind === 'heavy' || this.chargeK > 0.5 ? 'swing-heavy' : 'swing');
           this.viewmodel.slash(this.comboSide, active);
           this.fx.onSwing();
-          this.knock.addScaledVector(this.forward, w.kind === 'thrust' ? 4 : w.kind === 'heavy' ? 3 : 2.5);
+          this.knock.addScaledVector(this.forward, (w.kind === 'thrust' ? 4 : w.kind === 'heavy' ? 3 : 2.5) * (1 + this.chargeK * 1.4));
+          if (this.chargeK >= 0.95) this.game.chargedRelease(this);
         }
       }
       if (w.kind !== 'cast') this.checkHits();
@@ -381,7 +412,9 @@ export class Player {
 
   checkHits(override = null) {
     const w = override || this.weapon;
-    const reach = w.reach * this.stats.reach;
+    const ck = override ? 0 : this.chargeK;
+    const reach = w.reach * this.stats.reach + ck * 0.6 + (ck >= 0.95 ? 0.8 : 0);
+    const arc = w.arc + ck * 0.5;
     for (const e of this.game.nearbyEnemies()) {
       if (!e.active || this.hitSet.has(e)) continue;
       const dx = e.pos.x - this.pos.x, dz = e.pos.z - this.pos.z;
@@ -389,13 +422,16 @@ export class Player {
       if (Math.abs(dy) > 2.2) continue;
       const d = Math.hypot(dx, dz);
       if (d - e.radius > reach) continue;
-      if (d > e.radius + 0.5 && Math.abs(angleDiff(this.yaw, yawOf(dx, dz))) > w.arc / 2) continue;
+      if (d > e.radius + 0.5 && Math.abs(angleDiff(this.yaw, yawOf(dx, dz))) > arc / 2) continue;
       this.hitSet.add(e);
       const dir = new THREE.Vector3(dx / (d || 1), 0, dz / (d || 1));
       let dmg = w.damage * this.stats.damageMult * this.fx.damageBonus() * rand(0.9, 1.1);
       // Veiled Grace: the Duchess strikes harder from the shadows or at the unaware.
       if (this.classDef.id === 'duchess' && (this.hidden || e.asleep)) dmg *= 1.4;
-      const result = e.receiveHit(dmg, dir, this, { posture: w.posture, burn: w.burn || 0, veiled: this.hidden });
+      // A charged blow lands far harder; a strike out of a slide takes the legs.
+      dmg *= 1 + ck * 1.1;
+      const posture = (w.posture ?? 6) * (1 + ck * 1.6) * (this.slideStrike && !override ? 2 : 1);
+      const result = e.receiveHit(dmg, dir, this, { posture, burn: w.burn || 0, veiled: this.hidden });
       this.game.onEnemyHit(e, result, dir, dmg);
       if (result === 'blocked') {
         this.stamina = Math.max(0, this.stamina - 8);
@@ -420,6 +456,7 @@ export class Player {
     this.skillFired = false;
     this.hitSet.clear();
     if (sk.id === 'sidestep') {
+      this.perfectDodged = false;
       const [sx, f] = this.game.input.moveAxes();
       const fw = this.forward;
       _right.set(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
@@ -536,6 +573,187 @@ export class Player {
       this.vel.set(0, 0, 0);
       this.setState('idle');
     }
+  }
+
+  // ---- Executions ------------------------------------------------------------
+
+  /** A posture-broken or sleeping foe right in front of you, close enough to finish. */
+  findExecutionTarget() {
+    if (!this.grounded || this.weapon.kind === 'cast' && this.weapon.typeId === 'wand') return null;
+    let best = null, bestD = Infinity;
+    for (const e of this.game.nearbyEnemies()) {
+      if (!e.executable) continue;
+      const dx = e.pos.x - this.pos.x, dz = e.pos.z - this.pos.z;
+      const d = Math.hypot(dx, dz) - e.radius;
+      if (d > 2.1 || Math.abs(e.pos.y - this.pos.y) > 1.4) continue;
+      if (Math.abs(angleDiff(this.yaw, yawOf(dx, dz))) > 0.85) continue;
+      if (d < bestD) { best = e; bestD = d; }
+    }
+    return best;
+  }
+
+  startExecution(e) {
+    this.exTarget = e;
+    this.exFrom = this.pos.clone();
+    this.exFired = 0;
+    this.exBack = !e.asleep && Math.abs(angleDiff(e.yaw, yawOf(e.pos.x - this.pos.x, e.pos.z - this.pos.z))) < 1.2;
+    this.invuln = Math.max(this.invuln, 1.3);
+    this.vel.set(0, 0, 0);
+    this.knock.set(0, 0, 0);
+    this.hitSet.clear();
+    this.setState('execute');
+    e.held = 0.3;
+    this.game.onExecutionStart(this, e);
+    return true;
+  }
+
+  /** Close in, drive the blade home, wrench it free. */
+  updateExecute(dt) {
+    const e = this.exTarget, t = this.stateTime, game = this.game;
+    if (!e.dead) e.held = 0.3;
+    const dx = this.pos.x - e.pos.x, dz = this.pos.z - e.pos.z;
+    const d = Math.hypot(dx, dz) || 1;
+    const stand = e.radius + 0.75;
+    if (t < 0.22 && !e.dead) {
+      const k = Math.min(1, dt * 14);
+      this.pos.x += (e.pos.x + (dx / d) * stand - this.pos.x) * k;
+      this.pos.z += (e.pos.z + (dz / d) * stand - this.pos.z) * k;
+    }
+    const aimYaw = yawOf(e.pos.x - this.pos.x, e.pos.z - this.pos.z);
+    this.yaw += angleDiff(this.yaw, aimYaw) * Math.min(1, dt * 12);
+    const chest = e.pos.y + e.height * 0.6 - (this.pos.y + CONFIG.player.eyeHeight);
+    this.pitch = damp(this.pitch, clamp(Math.atan2(chest, d), -0.9, 0.6), 10, dt);
+    const dir = new THREE.Vector3(-dx / d, 0, -dz / d);
+    if (this.exFired === 0 && t > 0.3) {
+      this.exFired = 1;
+      const w = this.weapon;
+      const dmg = Math.max(22, w.damage) * this.stats.damageMult * this.fx.damageBonus() * this.stats.riposteMult * (e.isBoss ? 1.6 : 2.4);
+      e.takeRawDamage(dmg, dir, 0);
+      game.onExecutionStrike(this, e, dmg, dir);
+    }
+    if (this.exFired === 1 && t > 0.62) {
+      this.exFired = 2;
+      game.onExecutionRip(this, e, dir);
+      if (!e.dead) {
+        e.afterExecution();
+        e.vel.addScaledVector(dir, 5 / e.mass);
+        e.knockTimer = 0.25;
+      }
+    }
+    if (t > 0.9) {
+      this.exTarget = null;
+      this.invuln = Math.max(this.invuln, 0.2);
+      game.onExecutionEnd(this);
+      this.setState('idle');
+    }
+  }
+
+  // ---- Dodge, slide, mantle, plunge ----------------------------------------------
+
+  /** C: a quick dodge (or, at a sprint, a slide). */
+  tryDodge() {
+    const P = CONFIG.player;
+    if (this.dodgeCd > 0 || !this.grounded) return;
+    if (this.sprinting && this.state === 'idle') {
+      if (!this.spendStamina(10)) return;
+      const f = this.forward;
+      const sp = Math.max(Math.hypot(this.vel.x, this.vel.z), this.stats.speed * (P.sprintSpeed / P.speed)) * 1.35;
+      this.slideVel = new THREE.Vector3(f.x * sp, 0, f.z * sp);
+      this.dodgeCd = 0.5;
+      this.setState('slide');
+      this.game.audio.play('slide');
+      return;
+    }
+    if (!['idle', 'guard', 'recoil', 'hurt'].includes(this.state)) return;
+    if (!this.spendStamina(22)) return;
+    const [sx, fa] = this.game.input.moveAxes();
+    const fw = this.forward;
+    _right.set(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
+    this.skillDir.set(fw.x * fa + _right.x * sx, 0, fw.z * fa + _right.z * sx);
+    if (this.skillDir.lengthSq() < 0.01) this.skillDir.copy(fw).negate();
+    this.skillDir.normalize();
+    this.perfectDodged = false;
+    this.dodgeCd = 0.42;
+    this.setState('dodge');
+    this.game.audio.play('dodge');
+    this.game.onDodge(this);
+  }
+
+  /** A ledge ahead within reach: where you would stand on top of it. */
+  findLedge(maxRise) {
+    const world = this.game.room.world;
+    const f = this.forward;
+    for (const d of [0.7, 1.0]) {
+      const x = this.pos.x + f.x * d, z = this.pos.z + f.z * d;
+      const g = world.groundAt(x, z, this.pos.y + maxRise, 0);
+      if (g === null) continue;
+      const rise = g - this.pos.y;
+      if (rise <= STEP_HEIGHT + 0.1 || rise > maxRise) continue;
+      const tx = x + f.x * 0.3, tz = z + f.z * 0.3;
+      if (world.surfaceBlocks(tx, tz, g, 1.7)) continue;
+      const tg = world.groundAt(tx, tz, g + 0.3);
+      if (tg === null || Math.abs(tg - g) > 0.35) continue;
+      if (world.hitsObstacle(new THREE.Vector3(tx, g + 0.9, tz), 0.2)) continue;
+      if (this.boxBetween(world, x, z, tx, tz, g)) continue;
+      return new THREE.Vector3(tx, tg, tz);
+    }
+    return null;
+  }
+
+  boxBetween(world, x0, z0, x1, z1, y) {
+    for (const b of world.boxes) {
+      if (!b.enabled || b.y1 + world.oy < y + 0.1 || b.y0 + world.oy > y + 1.7) continue;
+      for (const k of [0, 0.5, 1]) {
+        const x = x0 + (x1 - x0) * k - world.ox, z = z0 + (z1 - z0) * k - world.oz;
+        if (x > b.x0 - 0.35 && x < b.x1 + 0.35 && z > b.z0 - 0.35 && z < b.z1 + 0.35) return true;
+      }
+    }
+    return false;
+  }
+
+  startMantle(top) {
+    this.mantleFrom = this.pos.clone();
+    this.mantleTo = top;
+    this.vel.set(0, 0, 0);
+    this.knock.set(0, 0, 0);
+    this.setState('mantle');
+    this.game.audio.play('mantle');
+  }
+
+  updateMantle(dt) {
+    const t = this.stateTime, A = this.mantleFrom, B = this.mantleTo;
+    const rise = Math.max(0.3, B.y - A.y);
+    const up = 0.16 + rise * 0.1;
+    if (t < up) {
+      const k = easeOut(t / up);
+      this.pos.set(A.x, A.y + (B.y + 0.1 - A.y) * k, A.z);
+    } else if (t < up + 0.16) {
+      const k = (t - up) / 0.16;
+      this.pos.set(A.x + (B.x - A.x) * k, B.y + 0.1 * (1 - k), A.z + (B.z - A.z) * k);
+    } else {
+      this.pos.copy(B);
+      this.grounded = true;
+      this.vel.set(0, 0, 0);
+      this.setState('idle');
+      this.game.audio.play('land');
+    }
+  }
+
+  canPlunge() {
+    if (this.weapon.kind === 'cast' || !['idle', 'guard'].includes(this.state)) return false;
+    const g = this.game.room.world.groundAt(this.pos.x, this.pos.z, this.pos.y);
+    return g !== null && this.pos.y - g > 1.6;
+  }
+
+  startPlunge() {
+    this.plungeFrom = this.pos.y;
+    this.vel.y = Math.min(this.vel.y, -6);
+    this.vel.x *= 0.4;
+    this.vel.z *= 0.4;
+    this.hitSet.clear();
+    this.setState('plunge');
+    this.game.audio.play('swing-heavy');
+    return true;
   }
 
   // ---- Ultimate ------------------------------------------------------------
@@ -763,6 +981,7 @@ export class Player {
     this.staminaDelay = Math.max(0, this.staminaDelay - dt);
     this.manaDelay = Math.max(0, this.manaDelay - dt);
     this.skillCd = Math.max(0, this.skillCd - dt);
+    this.dodgeCd = Math.max(0, this.dodgeCd - dt);
     if (this.manaDelay <= 0 && this.alive) this.mana = Math.min(S.maxMana, this.mana + S.manaRegen * dt);
     this.arts.update(dt);
     this.restage.update(dt);
@@ -780,6 +999,7 @@ export class Player {
       if (input.wasPressed('KeyQ')) this.trySkill();
       if (input.wasPressed('KeyR')) this.tryUltimate();
       if (input.wasPressed('KeyF')) this.tryFlask();
+      if (input.wasPressed('KeyC')) this.tryDodge();
       if (input.wasPressed('KeyZ')) this.arts.tryUse(0);
       if (input.wasPressed('KeyX')) this.arts.tryUse(1);
       if (['idle', 'guard'].includes(this.state)) {
@@ -800,6 +1020,31 @@ export class Player {
         break;
       case 'attack':
         this.updateAttack();
+        break;
+      case 'charge': {
+        const k = Math.min(1, this.stateTime / 0.75);
+        if (k >= 1 && !this.chargeFull) {
+          this.chargeFull = true;
+          this.game.onChargeFull(this);
+        }
+        if (!input.lmb) {
+          // Let fly: back into the swing at the moment the blade comes down.
+          this.chargeK = k < 0.3 ? 0 : k;
+          this.chargeFull = false;
+          this.noCharge = true;
+          const { windup } = this.attackTimings();
+          this.setState('attack');
+          this.stateTime = windup;
+        }
+        break;
+      }
+      case 'dodge':
+        if (this.stateTime < 0.2) this.knock.copy(this.skillDir).multiplyScalar(12 * (1 - this.stateTime / 0.28));
+        if (this.stateTime > 0.34) this.setState('idle');
+        break;
+      case 'slide':
+        if (input.consume('attack')) this.tryAttack();
+        else if (this.stateTime > 0.75 || this.slideVel.length() < this.stats.speed * 0.8) this.setState('idle');
         break;
       case 'skill':
         this.updateSkill();
@@ -834,8 +1079,10 @@ export class Player {
     }
 
     // On a ladder, the climb carries you; no walking, no gravity.
-    if (this.state === 'climb') {
-      this.updateClimb(dt);
+    if (this.state === 'climb' || this.state === 'execute' || this.state === 'mantle') {
+      if (this.state === 'climb') this.updateClimb(dt);
+      else if (this.state === 'execute') this.updateExecute(dt);
+      else this.updateMantle(dt);
       this.updateCamera(dt, 0);
       return;
     }
@@ -843,7 +1090,7 @@ export class Player {
     // Movement.
     const [strafe, fwdAxis] = this.alive ? input.moveAxes() : [0, 0];
     const moving = strafe !== 0 || fwdAxis !== 0;
-    const mult = { idle: 1, guard: 0.5, attack: 0.3, recoil: 0.3, guardbreak: 0.15, hurt: 0.4, dead: 0, skill: 0.4, drink: 0.35, swap: 0.8, ult: this.ultId === 'oath' ? 0.5 : this.ultId === 'finale' || this.ultId === 'march' ? 0.6 : 0, art: this.artId === 'breath' ? 0.45 : 0.3 }[this.state] ?? 1;
+    const mult = { idle: 1, guard: 0.5, attack: 0.3, recoil: 0.3, guardbreak: 0.15, hurt: 0.4, dead: 0, skill: 0.4, drink: 0.35, swap: 0.8, charge: 0.35, dodge: 0.2, plunge: 0.3, ult: this.ultId === 'oath' ? 0.5 : this.ultId === 'finale' || this.ultId === 'march' ? 0.6 : 0, art: this.artId === 'breath' ? 0.45 : 0.3 }[this.state] ?? 1;
     this.sprinting = this.state === 'idle' && fwdAxis > 0 && input.down('ShiftLeft', 'ShiftRight') && this.stamina > 0 && this.grounded;
     const wading = this.grounded && this.pos.y < -0.3 && this.game.mode === 'run';
     const speed = (this.sprinting ? S.speed * (P.sprintSpeed / P.speed) : S.speed) * mult * (wading ? 0.62 : 1) * this.streakMult;
@@ -859,14 +1106,44 @@ export class Player {
     const wx = (f.x * fwdAxis + _right.x * strafe) * speed;
     const wz = (f.z * fwdAxis + _right.z * strafe) * speed;
     const accel = this.grounded ? 14 : 2.5;
-    this.vel.x = damp(this.vel.x, wx, accel, dt);
-    this.vel.z = damp(this.vel.z, wz, accel, dt);
+    if (this.state === 'slide') {
+      // Momentum carries you; the stones slow you; a little steering.
+      this.slideVel.multiplyScalar(Math.exp(-1.6 * dt));
+      const sp = this.slideVel.length();
+      const along = new THREE.Vector3(wx, 0, wz).multiplyScalar(0.15);
+      this.slideVel.add(along.multiplyScalar(dt * 4)).setLength(sp);
+      this.vel.x = this.slideVel.x;
+      this.vel.z = this.slideVel.z;
+      if (Math.random() < dt * 30) {
+        this.game.particles.emit({
+          pos: new THREE.Vector3(this.pos.x + rand(-0.3, 0.3), this.pos.y + 0.05, this.pos.z + rand(-0.3, 0.3)),
+          vel: new THREE.Vector3(rand(-0.6, 0.6), rand(0.4, 1.2), rand(-0.6, 0.6)), life: rand(0.4, 0.8), size: rand(0.05, 0.1), color: 0x5a5448, gravity: 3, floor: this.pos.y,
+        });
+      }
+    } else {
+      this.vel.x = damp(this.vel.x, wx, accel, dt);
+      this.vel.z = damp(this.vel.z, wz, accel, dt);
+    }
     this.knock.multiplyScalar(Math.exp(-9 * dt));
 
     if (this.grounded) this.jumpsUsed = 0;
-    if (this.grounded && input.consume('jump') && (this.state === 'idle' || this.state === 'guard') && this.spendStamina(P.jumpCost)) {
-      this.vel.y = P.jumpVelocity;
+    const canAct = this.state === 'idle' || this.state === 'guard' || this.state === 'slide';
+    // Jump at a ledge within reach to haul yourself up; in the air, reach for any edge ahead.
+    let ledge = null;
+    if (this.alive && canAct && fwdAxis > 0) {
+      if (this.grounded && input.peek('jump')) ledge = this.findLedge(2.1);
+      else if (!this.grounded && this.vel.y < 3) ledge = this.findLedge(1.35);
+    }
+    if (ledge) {
+      input.consume('jump');
+      this.startMantle(ledge);
+      this.updateCamera(dt, strafe);
+      return;
+    }
+    if (this.grounded && canAct && input.consume('jump') && this.spendStamina(P.jumpCost)) {
+      this.vel.y = P.jumpVelocity * (this.state === 'slide' ? 1.1 : 1);
       this.grounded = false;
+      if (this.state === 'slide') this.setState('idle');
     } else if (!this.grounded && this.jumpsUsed < S.extraJumps && (this.state === 'idle' || this.state === 'guard')
       && this.vel.y < 3.5 && input.consume('jump') && this.spendStamina(P.jumpCost)) {
       // A relic's second wind: a burst of feathers and ash, and up again.
@@ -885,8 +1162,14 @@ export class Player {
     const newY = this.pos.y + this.vel.y * dt;
     const ground = world.groundAt(this.pos.x, this.pos.z, this.pos.y);
     const wasGrounded = this.grounded;
+    if (this.state === 'plunge') this.vel.y = Math.min(this.vel.y, -18);
     if (ground !== null && this.vel.y <= 0 && newY <= ground) {
-      if (!wasGrounded && this.vel.y < -7) {
+      if (this.state === 'plunge') {
+        this.pos.y = ground;
+        this.game.plungeImpact(this, Math.max(0, this.plungeFrom - ground));
+        this.setState('recoil');
+        this.stateTime = 0.1;
+      } else if (!wasGrounded && this.vel.y < -7) {
         this.game.audio.play('land');
         this.game.shake(Math.min(0.5, -this.vel.y * 0.03));
       }
@@ -936,8 +1219,21 @@ export class Player {
     if (this.state === 'dead') this.deathK = Math.min(1, this.deathK + dt * 1.2);
     const k = easeOut(this.deathK);
     const dip = this.dodging() ? Math.sin((this.stateTime / 0.24) * Math.PI) * 0.35 : 0;
-    cam.position.set(this.pos.x, this.pos.y + lerp(P.eyeHeight, 0.35, k) + bob - dip + sh.y * 0.1, this.pos.z);
-    const lean = this.dodging() ? -this.skillDir.dot(_right.set(Math.cos(this.yaw), 0, -Math.sin(this.yaw))) * 0.12 : 0;
+    this.crouchK = damp(this.crouchK, this.state === 'slide' ? 1 : 0, 14, dt);
+    const mantleDip = this.state === 'mantle' ? Math.sin(Math.min(1, this.stateTime / 0.35) * Math.PI) * 0.25 : 0;
+    cam.position.set(this.pos.x, this.pos.y + lerp(P.eyeHeight, 0.35, k) + bob - dip - this.crouchK * 0.7 - mantleDip + sh.y * 0.1, this.pos.z);
+    // Field of view breathes with speed and narrows as a blow is gathered or driven home.
+    const fovTarget = (this.sprinting ? 5 : 0) + (this.state === 'slide' ? 10 : 0) + (this.state === 'dodge' ? 4 : 0)
+      + (this.state === 'charge' ? -6 * Math.min(1, this.stateTime / 0.75) : 0) + (this.state === 'execute' ? -12 : 0)
+      + (this.state === 'plunge' ? 12 : 0);
+    this.fovOffset = damp(this.fovOffset, fovTarget, this.state === 'execute' ? 6 : 5, dt);
+    const fov = this.game.settings.get('fov') + this.fovOffset + this.game.fovKick;
+    if (Math.abs(cam.fov - fov) > 0.02) {
+      cam.fov = fov;
+      cam.updateProjectionMatrix();
+    }
+    const lean = this.dodging() ? -this.skillDir.dot(_right.set(Math.cos(this.yaw), 0, -Math.sin(this.yaw))) * 0.12
+      : this.state === 'slide' ? 0.07 : 0;
     this.roll = damp(this.roll || 0, -strafe * 0.025 + lean, 8, dt);
     cam.rotation.set(this.pitch + sh.x * 0.04 + k * 0.4, this.yaw + sh.y * 0.04, this.roll + sh.z * 0.03 + k * 1.1, 'YXZ');
 
@@ -1228,6 +1524,32 @@ class Viewmodel {
       mainTarget = P3([0.34, -0.35 + Math.max(0, s) * 0.3, -0.55], [0.3, 0, 0.2]);
       offTarget = P3([-0.34, -0.35 + Math.max(0, -s) * 0.3, -0.55], [0.3, 0, -0.2]);
       mainRate = offRate = 12;
+    } else if (state === 'charge') {
+      // Gathered back over the shoulder (or drawn back for a thrust), trembling when full.
+      const k = Math.min(1, pl.stateTime / 0.75);
+      const tr = Math.sin(this.game.time * (k >= 1 ? 70 : 40)) * (k >= 1 ? 0.007 : 0.003 * k);
+      mainTarget = w.kind === 'thrust'
+        ? P3([0.42 + tr, -0.34, -0.36 + k * 0.12], [-1.5, 0, 0.1])
+        : P3([0.66 + tr, 0.04 + k * 0.1, -0.5 + k * 0.08], [0.05 + k * 0.3, 0, -1.25 - k * 0.25]);
+      mainRate = 12;
+    } else if (state === 'execute') {
+      // Drawn back, driven in and twisted, then wrenched free.
+      const t = pl.stateTime;
+      if (t < 0.3) mainTarget = P3([0.45, -0.18, -0.32], [-1.45, 0, 0.1]);
+      else if (t < 0.62) mainTarget = P3([0.12 + Math.sin(t * 50) * 0.008, -0.3, -1.05], [-1.55, 0, 0.05 + (t - 0.3) * 1.6]);
+      else mainTarget = P3([0.58, -0.5, -0.5], [-0.5, 0, -0.7]);
+      if (t < 0.62) offTarget = P3([-0.22, -0.3, -0.78], [0.2, 0.3, 0.1]);
+      mainRate = t >= 0.3 && t < 0.4 ? 60 : 22;
+      offRate = 18;
+    } else if (state === 'mantle') {
+      mainTarget = P3([0.3, -0.42, -0.72], [0.25, 0, 0.3]);
+      offTarget = P3([-0.3, -0.42, -0.72], [0.25, 0, -0.3]);
+      mainRate = offRate = 22;
+    } else if (state === 'plunge') {
+      mainTarget = P3([0.12, -0.18, -0.62], [-2.8, 0, 0]);
+      mainRate = 26;
+    } else if (state === 'slide') {
+      offTarget = P3([-0.58, -0.78, -0.55], [0.4, 0, 0.3]);
     } else if (state === 'art') {
       // The staff thrust forward, tip towards the target, trembling with the spell.
       const t = pl.stateTime;
@@ -1277,7 +1599,7 @@ class Viewmodel {
       this.light.intensity = 1.2 * flameFlicker * flare;
       this.light.position.set(-0.3, -0.9, 0.1);
     }
-    if (this.tip) this.tip.scale.setScalar(state === 'attack' && pl.stateTime < pl.attackTimings().windup ? 1.8 : 1);
+    if (this.tip) this.tip.scale.setScalar(state === 'charge' ? 1.8 + Math.min(1, pl.stateTime / 0.75) * 1.4 : state === 'attack' && pl.stateTime < pl.attackTimings().windup ? 1.8 : 1);
 
     this.trailT += dt;
     if (this.trailDur) {
