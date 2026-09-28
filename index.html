@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ashen Descent</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=IM+Fell+English:ital@0;1&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <script type="importmap">
+    { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js" } }
+  </script>
+</head>
+<body>
+  <div id="game-root"></div>
+
+  <div id="hud" class="hidden">
+    <div id="floor-label">
+      <span id="floor-num">I</span>
+      <span id="floor-name">The Sunken Ossuary</span>
+    </div>
+
+    <canvas id="minimap" width="176" height="120"></canvas>
+
+    <div id="vitals">
+      <div id="hp-bar" class="bar hp"><div class="trail"></div><div class="fill"></div></div>
+      <div id="st-bar" class="bar st"><div class="fill"></div></div>
+    </div>
+
+    <div id="relics"></div>
+
+    <div id="boss" class="hidden">
+      <div class="boss-name"></div>
+      <div class="bar boss-bar"><div class="trail"></div><div class="fill"></div></div>
+    </div>
+  </div>
+
+  <div id="banner"><div class="banner-text"></div></div>
+
+  <div id="item-banner">
+    <div class="item-name"></div>
+    <div class="item-desc"></div>
+    <div class="item-lore"></div>
+  </div>
+
+  <div id="title-screen" class="overlay">
+    <div class="title-inner">
+      <h1>Ashen Descent</h1>
+      <p class="tagline">The lantern gutters. The dead do not rest.</p>
+      <ul class="controls">
+        <li><kbd>W A S D</kbd> Move</li>
+        <li><kbd>Mouse</kbd> Aim</li>
+        <li><kbd>Left Click</kbd> Slash</li>
+        <li><kbd>Space</kbd> Dodge roll</li>
+        <li><kbd>Esc</kbd> Pause &nbsp; <kbd>M</kbd> Mute</li>
+      </ul>
+      <button id="start-btn">Descend</button>
+    </div>
+  </div>
+
+  <div id="pause-screen" class="overlay hidden">
+    <div class="title-inner">
+      <h2>Paused</h2>
+      <div id="pause-stats"></div>
+      <p class="hint">Press Esc to resume</p>
+    </div>
+  </div>
+
+  <div id="death-screen" class="overlay hidden">
+    <div class="died">YOU DIED</div>
+    <div class="died-sub">Click or press R to rise again</div>
+  </div>
+
+  <div id="crt"></div>
+
+  <script type="module" src="game.js"></script>
+</body>
+</html>
