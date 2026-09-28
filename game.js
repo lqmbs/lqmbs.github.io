@@ -323,6 +323,7 @@ class Game {
 
   /** Raise the next floor: pick its biome, build every chamber and stitch them together. */
   newFloor() {
+    this.hub.exit();
     this.floor?.dispose();
     this.room = null;
     this.biome = BIOMES[this.runBiomes?.[this.depth - 1] ?? pick(Object.keys(BIOMES))];

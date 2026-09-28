@@ -129,8 +129,16 @@ export class Hub {
 
   entryPose() { return this.spawnPose; }
   exitDirection() { return null; }
-  enter() { this.group.visible = true; }
-  exit() { this.group.visible = false; }
+  /** The Hold lives in the scene only while the knight is in it; during a run it is detached entirely. */
+  enter() {
+    this.group.visible = true;
+    if (!this.group.parent) this.game.scene.add(this.group);
+  }
+
+  exit() {
+    this.group.visible = false;
+    this.group.parent?.remove(this.group);
+  }
 
   update(dt) {
     this.time += dt;
@@ -205,7 +213,6 @@ export class Hub {
     const game = this.game;
     this.group = new THREE.Group();
     this.group.visible = false;
-    game.scene.add(this.group);
     this.world = new World();
     this.world.minWalkY = -0.45;
     this.world.addField(terrainHeight);
