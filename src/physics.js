@@ -223,6 +223,22 @@ export class World {
     }
   }
 
+  /** Nudge a cylinder out of the ground it overlaps: the smallest move that frees it. */
+  unstick(pos, r, feetY, height) {
+    for (let d = 0.05; d <= 1.5; d += 0.05) {
+      for (let i = 0; i < 16; i++) {
+        const a = (i / 16) * Math.PI * 2;
+        const x = pos.x + Math.cos(a) * d, z = pos.z + Math.sin(a) * d;
+        if (!this.blockedAt(x, z, r, feetY, height)) {
+          pos.x = x;
+          pos.z = z;
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
   /**
    * Slide a cylinder by (dx, dz). With `allowFall` false the mover refuses to step off an edge
    * (used by enemy AI), otherwise it will happily walk into the abyss.
@@ -238,6 +254,10 @@ export class World {
       const g = this.groundAt(x, z, feetY);
       return g !== null && feetY - g <= maxDrop;
     };
+    // Already embedded in a block of ground (fell past a ledge while overlapping its edge, or a
+    // platform moved into us)? Every step would be refused, so first slip out to the nearest
+    // free spot.
+    if (this.blockedAt(pos.x, pos.z, r, feetY, height)) this.unstick(pos, r, feetY, height);
     const nx = pos.x + dx, nz = pos.z + dz;
     if (ok(nx, nz)) { pos.x = nx; pos.z = nz; }
     else if (ok(nx, pos.z)) pos.x = nx;

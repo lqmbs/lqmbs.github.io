@@ -711,6 +711,44 @@ export class Player {
     return false;
   }
 
+  /**
+   * Boxed in: every way out is a wall or a step too high (a sliver of floor between a wall and a
+   * ledge that no ladder covers). Haul yourself up onto the nearest ground you could stand on,
+   * or failing that, back to the last safe footing.
+   */
+  escapeWedge(world) {
+    const { x, y, z } = this.pos;
+    const r = this.radius, h = this.height;
+    const walkable = (px, pz) => !world.blockedAt(px, pz, r, y, h);
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2;
+      if (walkable(x + Math.cos(a) * 0.3, z + Math.sin(a) * 0.3)) return false;
+    }
+    let best = null, bestD = Infinity;
+    for (let d = 0.6; d <= 4; d += 0.3) {
+      for (let i = 0; i < 16; i++) {
+        const a = (i / 16) * Math.PI * 2;
+        const px = x + Math.cos(a) * d, pz = z + Math.sin(a) * d;
+        const g = world.groundAt(px, pz, y + 4, 0);
+        if (g === null || g < y - 0.3 || world.blockedAt(px, pz, r, g, h)) continue;
+        const cost = d + (g - y) * 0.5;
+        if (cost < bestD) { bestD = cost; best = new THREE.Vector3(px, g, pz); }
+      }
+      if (best) break;
+    }
+    if (best) {
+      this.startMantle(best);
+      return true;
+    }
+    if (this.lastSafe) {
+      this.pos.set(this.lastSafe.x, this.lastSafe.y, this.lastSafe.z);
+      this.vel.set(0, 0, 0);
+      this.game.flash = Math.max(this.game.flash, 0.3);
+      return true;
+    }
+    return false;
+  }
+
   startMantle(top) {
     this.mantleFrom = this.pos.clone();
     this.mantleTo = top;
@@ -1156,7 +1194,16 @@ export class Player {
     }
 
     const dx = (this.vel.x + this.knock.x) * dt, dz = (this.vel.z + this.knock.z) * dt;
+    const bx = this.pos.x, bz = this.pos.z;
     world.move(this.pos, this.pos.y, dx, dz, this.radius, this.height, { allowFall: true });
+    // Pressing to move but going nowhere: if we are boxed in on every side, climb out.
+    if (moving && this.alive && this.grounded && (this.state === 'idle' || this.state === 'guard')
+      && Math.hypot(this.pos.x - bx, this.pos.z - bz) < 0.002) this.wedgeT = (this.wedgeT || 0) + dt;
+    else this.wedgeT = 0;
+    if (this.wedgeT > 0.6) {
+      this.wedgeT = 0;
+      if (this.escapeWedge(world)) { this.updateCamera(dt, strafe); return; }
+    }
 
     this.vel.y -= P.gravity * dt;
     const newY = this.pos.y + this.vel.y * dt;
