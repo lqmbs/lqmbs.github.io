@@ -18,6 +18,8 @@ import { CLASSES } from './src/classes.js';
 import { Settings } from './src/settings.js';
 import { Sunfall } from './src/builds.js';
 import { Pickup, dropCoins } from './src/pickups.js';
+import { DealRealm } from './src/realm.js';
+import { Cutscene } from './src/cutscene.js';
 
 const EXPEDITION_FLOORS = 3;
 
@@ -191,7 +193,42 @@ class Game {
       this.player.viewmodel.hemi.intensity = 1.6;
       u.shadowTint.value.setHex(0x506068);
       this.audio.setMode('hub');
+    } else if (env === 'devil' || env === 'angel') {
+      // The realms: a blood moon over a lava sea, or a gold dawn above the clouds.
+      const devil = env === 'devil';
+      const M = this.materials;
+      this.scene.fog.color.setHex(devil ? 0x2a0a0c : 0xe8dcc8);
+      this.scene.fog.density = devil ? 0.012 : 0.009;
+      this.scene.background.setHex(devil ? 0x2a0a0c : 0xe8dcc8);
+      this.hemi.color.setHex(devil ? 0xa03030 : 0xfff0d8);
+      this.hemi.groundColor.setHex(devil ? 0x200404 : 0x8a8070);
+      this.hemi.intensity = devil ? 0.8 : 0.9;
+      this.ambient.color.setHex(devil ? 0x401010 : 0xc0b8a8);
+      this.ambient.intensity = devil ? 0.3 : 0.25;
+      this.sun.intensity = devil ? 0.6 : 2.2;
+      this.sun.color.setHex(devil ? 0xff4040 : 0xfff0d0);
+      this.sun.castShadow = true;
+      this.lanternScale = devil ? 0.7 : 0.4;
+      M.floor.color.setHex(devil ? 0x4a3a3e : 0xece6d8);
+      M.brick.color.setHex(devil ? 0x2c2226 : 0xdcd4c4);
+      M.trim.color.setHex(devil ? 0x161012 : 0xb8a888);
+      M.rock.color.setHex(devil ? 0x2a2224 : 0xc8c0b0);
+      M.crystal.color.setHex(devil ? 0xff2a20 : 0xffe8a0);
+      M.crystal.emissive.setHex(devil ? 0xff2a20 : 0xffe8a0);
+      M.windowWarm.color.setHex(devil ? 0xff3010 : 0xffe8b0);
+      M.windowCold.color.setHex(devil ? 0xff3010 : 0xffffff);
+      [-7, -12, -18].forEach((y, i) => {
+        const m = this.mist[i];
+        m.position.y = y;
+        m.material.color.setHex(devil ? 0x802020 : 0xfff8f0);
+        m.material.opacity = devil ? [0.35, 0.28, 0.2][i] : [0.8, 0.7, 0.6][i];
+      });
+      this.fallY = -9;
+      this.player.viewmodel.hemi.color.setHex(devil ? 0xff6060 : 0xfff0d0);
+      u.shadowTint.value.setHex(devil ? 0x401018 : 0x8090b0);
+      this.audio.setMode('depths');
     } else {
+      this.sun.color.setHex(0xe6e2d4);
       const t = this.theme;
       const M = this.materials;
       const sunlit = t.lighting === 'sun';
@@ -357,6 +394,9 @@ class Game {
     this.hud.setFloor(this.depth, name);
     this.player.flasks = this.player.maxFlasks;
     this.player.stats.deathWard = this.player.stats.wardMax || 0;
+    this.player.summoner.clear();
+    this.player.reveal();
+    this.recentDeaths = [];
     this.tookDamage = false;
     this.particles.clear();
     this.glow.clear();
@@ -378,11 +418,105 @@ class Game {
     this.hud.drawMinimap(this.floor, room, this.player);
   }
 
-  nearbyEnemies() { return this.mode === 'run' && this.floor ? this.floor.activeEnemies : this.room.enemies; }
+  nearbyEnemies() { return this.mode === 'run' && this.floor && !this.realm ? this.floor.activeEnemies : this.room.enemies; }
 
   nearbyInteractables() {
-    if (this.mode !== 'run' || !this.floor) return this.room.interactables || [];
+    if (this.mode !== 'run' || !this.floor || this.realm) return this.room.interactables || [];
     return this.floor.active.flatMap((r) => r.interactables);
+  }
+
+  /** Tick whichever world the knight is in: the Hold, a floor, or a deal realm. */
+  tickWorld(dt) {
+    if (this.realm) this.realm.update(dt);
+    else if (this.mode === 'run' && this.floor) this.floor.update(dt, this.room);
+    else this.room.update(dt);
+  }
+
+  // ---- Portals, realms and cutscenes -------------------------------------------
+
+  startCutscene(script) {
+    this.cutscene = new Cutscene(this, script);
+    this.state = 'cutscene';
+    this.hud.setPrompt(null);
+  }
+
+  /** A deal portal swallows the knight: the camera is pulled into the rift, then elsewhere. */
+  enterPortal(portal) {
+    if (this.cutscene) return;
+    const p = this.player;
+    p.setState('idle');
+    p.vel.set(0, 0, 0);
+    const eye = p.eyePosition;
+    const c = portal.center;
+    const n = portal.normal;
+    // Approach from whichever side the knight stands on.
+    const side = Math.sign(eye.clone().sub(c).dot(n)) || 1;
+    const devil = portal.kind === 'devil';
+    this.audio.play(devil ? 'devil' : 'angel');
+    this.audio.play('portal');
+    this.startCutscene({
+      duration: 1.5,
+      shots: [
+        { t0: 0, t1: 0.7, from: { pos: eye, look: eye.clone().add(p.aim) }, to: { pos: c.clone().addScaledVector(n, side * 3), look: c } },
+        { t0: 0.7, t1: 1.5, from: { pos: c.clone().addScaledVector(n, side * 3), look: c }, to: { pos: c.clone().addScaledVector(n, -side * 0.5), look: c.clone().addScaledVector(n, -side * 4) } },
+      ],
+      events: [
+        { t: 0.7, fn: (g) => { g.flash = devil ? 0.4 : 0.9; g.shake(0.4); } },
+      ],
+      fades: [{ t0: 1.0, t1: 1.5, from: 1, to: 0 }],
+      onEnd: () => (portal.isReturn ? this.leaveRealm() : this.enterRealm(portal)),
+    });
+  }
+
+  enterRealm(portal) {
+    const p = this.player;
+    const back = portal.group.position.clone().addScaledVector(portal.normal, 2.5);
+    // Step back out facing away from the rift.
+    this.realmReturn = { room: this.room, pose: { x: back.x, y: portal.group.position.y, z: back.z, yaw: Math.atan2(-portal.normal.x, -portal.normal.z) } };
+    this.floor.root.visible = false;
+    this.clearTransients();
+    this.realm = new DealRealm(this, portal.kind);
+    this.room = this.realm;
+    this.setEnvironment(portal.kind);
+    this.hud.setMinimapVisible(false);
+    this.hud.hideBoss();
+    this.hud.setFloor(this.depth, this.realm.name);
+    this.placePlayer(this.realm.spawnPose);
+    p.lastSafe = { ...this.realm.spawnPose };
+    this.assignLights(this.realm);
+    this.fade = 1;
+    const script = this.realm.arrivalScript();
+    script.onEnd = () => { this.state = 'playing'; this.cutscene = null; };
+    this.startCutscene(script);
+  }
+
+  leaveRealm() {
+    const r = this.realmReturn;
+    this.realm.dispose();
+    this.realm = null;
+    this.clearTransients();
+    this.floor.root.visible = true;
+    this.setEnvironment('depths');
+    this.hud.setMinimapVisible(true);
+    this.hud.setFloor(this.depth, this.biome.name);
+    this.room = r.room;
+    this.placePlayer(r.pose);
+    this.player.lastSafe = { x: r.pose.x, y: r.pose.y, z: r.pose.z };
+    this.lightTimer = 0;
+    this.floor.update(0, this.room);
+    this.assignNearestLights();
+    this.state = 'playing';
+    this.cutscene = null;
+    this.transition = { t: 0, phase: 'in', outTime: 0.1, inTime: 0.7, midpoint: () => {} };
+  }
+
+  clearTransients() {
+    this.particles.clear();
+    this.glow.clear();
+    for (const e of this.effects) e.dispose();
+    for (const b of this.bolts) b.dispose();
+    this.effects.length = 0;
+    this.bolts.length = 0;
   }
 
   descend() {
@@ -685,7 +819,11 @@ class Game {
   onEnemyHit(enemy, result, dir, dmg = 0, { proc = false } = {}) {
     const p = this.player;
     if (result !== 'miss' && result !== 'blocked' && dmg > 0) {
-      if (!proc) p.fx.onHit(enemy, dmg, result);
+      if (!proc) {
+        p.fx.onHit(enemy, dmg, result);
+        // The Duchess remembers every wound she deals, to Restage later.
+        if (p.classDef.id === 'duchess') p.restage.record(enemy, dmg);
+      }
       else p.addUltCharge(dmg * 0.12);
     }
     const c = enemy.pos.clone();
@@ -783,6 +921,10 @@ class Game {
     const S = this.player.stats;
     if (S.lifesteal > 0) this.player.hp = Math.min(S.maxHp, this.player.hp + S.lifesteal * 2);
     this.player.fx.onKill(enemy);
+    this.player.onKill(enemy);
+    // The Revenant's Immortal March raises what fell recently.
+    this.recentDeaths = (this.recentDeaths || []).filter((d) => this.time - d.t < 20);
+    this.recentDeaths.push({ pos: enemy.pos.clone(), height: enemy.height, t: this.time });
     if (this.mode !== 'run' || fell) return;
     // Coin, and now and then a key or a vial of blood.
     const area = enemy.chamber;
@@ -875,11 +1017,22 @@ class Game {
       this.render();
       return;
     }
-    if (this.state === 'shop') {
-      // The world keeps breathing while you haggle.
+    if (this.state === 'shop' || this.state === 'cutscene') {
+      // The world keeps breathing while you haggle, or while the camera tells a story.
       this.time += realDt;
-      this.shop?.update(realDt);
-      if (this.floor) this.floor.update(realDt, this.room);
+      if (this.state === 'shop') this.shop?.update(realDt);
+      else {
+        const cs = this.cutscene;
+        if (cs && (input.wasPressed('KeyE') || input.wasPressed('Space') || input.wasPressed('Escape') || input.wasPressed('Enter') || input.peek('attack'))) {
+          input.clearBuffers();
+          cs.skip();
+        } else cs?.update(realDt);
+      }
+      this.tickWorld(realDt);
+      if (this.state !== 'shop' && this.state !== 'cutscene') this.player.updateCamera(0, 0);
+      this.bolts = this.bolts.filter((b) => b.update(realDt));
+      this.player.fx.update(realDt);
+      this.player.summoner.update(realDt);
       this.particles.update(realDt);
       this.glow.update(realDt);
       this.effects = this.effects.filter((e) => e.update(realDt));
@@ -908,7 +1061,8 @@ class Game {
       this.room.update(realDt);
     } else if (!this.transition || this.transition.phase === 'in') {
       this.player.update(dt);
-      if (this.mode === 'run' && this.floor) {
+      if (this.realm) this.realm.update(dt);
+      else if (this.mode === 'run' && this.floor) {
         const r = this.floor.roomAt(this.player.pos.x, this.player.pos.z);
         if (r && r !== this.room) this.switchRoom(r);
         this.floor.update(dt, this.room);
@@ -920,7 +1074,7 @@ class Game {
       } else this.room.update(dt);
       this.updateInteraction();
       this.minimapTimer = (this.minimapTimer || 0) - realDt;
-      if (this.mode === 'run' && this.floor && this.minimapTimer <= 0) {
+      if (this.mode === 'run' && this.floor && !this.realm && this.minimapTimer <= 0) {
         this.minimapTimer = 0.08;
         this.hud.drawMinimap(this.floor, this.room, this.player);
       }

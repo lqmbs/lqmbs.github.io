@@ -61,9 +61,10 @@ export class GroundTelegraph {
  * spells (wand, staff) are bolts owned by the player.
  */
 export class Bolt {
-  constructor(game, pos, dir, owner, color, { damage = 14, speed = 12, burn = 0, pierce = false, size = 1, homing = 0, shape = 'bolt', life = 4, spell = true } = {}) {
+  constructor(game, pos, dir, owner, color, { damage = 14, speed = 12, burn = 0, pierce = false, size = 1, homing = 0, shape = 'bolt', life = 4, spell = true, onHit = null } = {}) {
     this.game = game;
     this.owner = owner;
+    this.onHit = onHit;
     this.color = color;
     this.damage = damage;
     this.burn = burn;
@@ -134,15 +135,22 @@ export class Bolt {
         return this.dispose(true);
       }
     } else {
+      // Swept test along this frame's flight, so fast bolts can't skip through a foe.
+      const sx = p.x - this.vel.x * dt, sz = p.z - this.vel.z * dt;
+      const segX = p.x - sx, segZ = p.z - sz;
+      const segLen2 = segX * segX + segZ * segZ || 1e-6;
       for (const e of this.game.nearbyEnemies()) {
         if (!e.active || this.hit.has(e)) continue;
-        if (Math.hypot(e.pos.x - p.x, e.pos.z - p.z) < e.radius + 0.35 && p.y > e.pos.y - 0.2 && p.y < e.pos.y + e.height + 0.2) {
+        const k = Math.max(0, Math.min(1, ((e.pos.x - sx) * segX + (e.pos.z - sz) * segZ) / segLen2));
+        const cx = sx + segX * k, cz = sz + segZ * k;
+        if (Math.hypot(e.pos.x - cx, e.pos.z - cz) < e.radius + 0.35 && p.y > e.pos.y - 0.2 && p.y < e.pos.y + e.height + 0.2) {
           this.hit.add(e);
           const dir = this.vel.clone().setY(0).normalize();
           const dmg = this.damage * player.stats.damageMult;
           e.takeRawDamage(dmg, dir, 3);
           if (e.alive) e.addPosture(8);
           if (e.alive && this.burn) e.ignite(3, this.burn);
+          if (e.alive) this.onHit?.(e);
           this.game.onEnemyHit(e, e.alive ? 'spell' : 'kill', dir, dmg, { proc: !this.spell });
           if (!this.pierce) return this.dispose(true);
         }
@@ -325,6 +333,7 @@ export class Enemy {
   /** Swing at the player. Returns the outcome from Player.receiveAttack (or 'miss'). */
   attackPlayer({ damage, range, arc, perilous = false, from = null }) {
     const p = this.player;
+    if (p.hidden) return 'miss';
     if (!from) {
       const d = this.distToPlayer();
       if (d - p.radius > range || Math.abs(p.pos.y - this.pos.y) > 2) return 'miss';
@@ -362,8 +371,16 @@ export class Enemy {
   }
 
   /** The knight's blade lands. Returns 'blocked' | 'hit' | 'riposte' | 'kill' | 'miss'. */
-  receiveHit(damage, dir, player, { posture = 6, burn = 0 } = {}) {
+  receiveHit(damage, dir, player, { posture = 6, burn = 0, veiled = false } = {}) {
     if (!this.active) return 'miss';
+    if (veiled) {
+      // A strike from the Duchess's veil: unseen, unblockable, and it lands like a riposte.
+      this.takeRawDamage(damage * player.stats.riposteMult, dir, 5);
+      if (this.dead) return 'kill';
+      this.addPosture(posture * 2);
+      if (this.state !== 'broken' && this.state !== 'lost') this.setState('flinch');
+      return 'riposte';
+    }
     if (this.canBlock() && chance(this.blockChance)) {
       this.setState('block');
       this.addPosture(10);
@@ -521,6 +538,11 @@ export class Enemy {
     }
     // Leashed to their chamber: if the knight leaves and gets far, they walk home and rest.
     if (this.game.room !== this.chamber && this.distToPlayer() > 26 && this.state === 'chase') this.setState('return');
+    // The Duchess's Finale: while she is veiled, hunters lose the scent and wander.
+    if (this.player.hidden && (this.state === 'chase' || this.state === 'strafe')) {
+      this.setState('lost');
+      this.lostDir = rand(0, TAU);
+    }
     if (this.elite && Math.random() < dt * 14) {
       this.game.glow.emit({
         pos: new THREE.Vector3(this.pos.x + rand(-0.6, 0.6), this.pos.y + rand(0.2, this.height), this.pos.z + rand(-0.6, 0.6)),
@@ -593,6 +615,14 @@ export class Enemy {
         this.brake(dt, 6);
         if (this.stateTime > 0.22) this.setState('chase');
         return true;
+      case 'lost': {
+        if (!this.player.hidden) { this.setState('chase'); return true; }
+        if (this.stateTime > 1.6) { this.lostDir += rand(-1.5, 1.5); this.stateTime = 0; }
+        const dx = Math.sin(this.lostDir), dz = Math.cos(this.lostDir);
+        this.steer(dx, dz, 1.2, dt, 4);
+        this.yaw = dampAngle(this.yaw, this.lostDir, 3, dt);
+        return true;
+      }
       case 'return': {
         const dx = this.home.x - this.pos.x, dz = this.home.z - this.pos.z;
         const d = Math.hypot(dx, dz);

@@ -68,14 +68,17 @@ export class Menus {
       }
       card.append(bars);
       const kit = el('div', 'card-kit');
-      kit.append(el('div', 'kit-row', `Armament — ${WEAPON_TYPES[c.weapon].name}${c.offhand === 'shield' ? ' & Kite Shield' : c.offhand === 'lantern' ? ' & Lantern' : ''}`));
+      const off = { shield: ' & Kite Shield', lantern: ' & Lantern', parrydagger: ' & Parrying Dagger' }[c.offhand] ?? '';
+      kit.append(el('div', 'kit-row', `Armament — ${WEAPON_TYPES[c.weapon].name}${off}`));
       const passive = el('div', 'kit-row');
       passive.append(el('b', '', `${c.passive.name}. `), document.createTextNode(c.passive.desc));
       const skill = el('div', 'kit-row');
       skill.append(el('b', '', `[Q] ${c.skill.name}. `), document.createTextNode(c.skill.desc));
       const ult = el('div', 'kit-row');
       ult.append(el('b', '', `[R] ${c.ultimate.name}. `), document.createTextNode(c.ultimate.desc));
-      kit.append(passive, skill, ult);
+      const bond = el('div', 'kit-row kit-bond');
+      bond.append(el('b', '', `Weapon bond — ${c.affinity.name}. `), document.createTextNode(c.affinity.desc));
+      kit.append(passive, skill, ult, bond);
       card.append(kit);
       const choose = () => {
         this.game.chooseClass(c.id);

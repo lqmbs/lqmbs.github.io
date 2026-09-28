@@ -29,6 +29,7 @@ GitHub Pages also works if you point it at the repository root. Clicking **Enter
 | Right click (hold) | Guard |
 | `Q` | Class skill |
 | `R` | Ultimate (when charged) |
+| `Z` `X` | Staff Arts (Lantern Mage holding a staff) |
 | `F` | Drink a Crimson Flask (heals 40%, refilled each floor) |
 | `E` | Interact: take a weapon, open a chest, unlock a gate, trade, accept a deal, rest at the table, begin an expedition |
 | `1 2 3` / mouse wheel | Switch weapon slots |
@@ -56,14 +57,36 @@ Dying in the sparring ground just sends you back to the table. On an expedition,
 | Vigil Knight | Longsword & kite shield | Wider parry window; the shield blocks almost everything | **Shield Bash**: lunges and staggers, and can hurl foes off ledges | **Oath of the Vigil**: leap and drive the sword down; a shockwave breaks every guard nearby, then an aegis halves all harm for 8 s |
 | Duelist | Twin daggers | Ripostes +40%; fastest on foot | **Sidestep**: a short dash in any direction with invincibility frames | **Thousand Cuts**: time bends; blink between up to seven foes, cutting each like a riposte |
 | Lantern Mage | Ember Wand & lantern | Mana well for spells; brighter lantern | **Lantern Flare**: blinds, staggers and ignites everything nearby | **Sunfall**: a captive sun crashes where you look, burning everything; mana is boundless for 6 s |
+| Duchess | Duchess Rapier & parrying dagger | Strikes from the shadows, or on the unaware, deal 40% more | **Restage**: every blow you dealt in the last few seconds is replayed on its victim, as a flurry of violet phantom cuts | **Finale**: vanish for 7 s; foes lose track of you and wander, and every strike from the veil lands like a riposte |
+| Revenant | Grave Scythe & lantern | Your phantoms mend you a little when they strike | **Call the Family**: summons the next of her phantom family in turn: Ser Aldric (a shield-knight whose slam staggers), Wynne (a witch who casts homing bolts), Grimtooth (a fast hound) | **Immortal March**: the whole family answers at once, empowered, and every foe slain nearby in the last 20 s rises as a spectral thrall |
 
 The ultimate charges as you fight: damage dealt, parries and kills all feed the gauge beside the skill slot, which glows when it is ready.
+
+### Weapon bonds
+
+Each class has a special bond with certain weapons. Any class can pick any weapon up, but only the bonded class gets the extra behaviour:
+
+| Class | Bond | With | Effect |
+| --- | --- | --- | --- |
+| Vigil Knight | Unbroken Stance | Longswords | Swings carry **hyperarmor**: blows during the windup and cut deal 30% less and never interrupt the attack |
+| Duelist | Bloodrush | Twin daggers | Kills in quick succession stack up to five times: each stack adds 8% move speed and swing speed, and the chain lapses after 4 s |
+| Lantern Mage | Staff Arts | Any staff | Two arts of the staff's element on `Z` and `X` (see below). Other classes can't use them, and without mana they can't even cast with a staff |
+| Duchess | Encore | Rapier, spear, daggers | Restage replays at 150%, and its victims bleed |
+| Revenant | Harvest | Scythes | Kills may raise the fallen as spectral thralls, and each kill lengthens the family's stay |
+
+**Staff Arts** (mana and a cooldown each):
+
+| Staff | Element | `Z` | `X` |
+| --- | --- | --- | --- |
+| Pyre Staff | Fire | **Pillar of Pyre**: a column of fire erupts where you look | **Dragon's Breath**: channel a cone of flame |
+| Sapphire Staff | Frost | **Frost Nova**: freeze everything around you | **Glacial Lance**: a great piercing lance that freezes what it passes through |
+| Tempest Staff | Storm | **Chain Lightning**: leaps between up to six foes | **Thunderstep**: blink forward as a bolt, shocking everything in your path |
 
 ## Weapons & inventory
 
 Nightreign-style: three weapon slots, flasks and relics. Everything is lost when the run ends; each expedition starts from your class's kit.
 
-- **Types:** Longsword, Twin Daggers, Greatsword, Winged Spear (thrusts), Morning Star, Ember Wand (burning bolts), Sapphire Staff (piercing lances).
+- **Types:** Longsword, Twin Daggers, Greatsword, Winged Spear (thrusts), Morning Star, Duchess Rapier (fast thrusts), Grave Scythe (wide reaping cleaves), Ember Wand (burning bolts), and three staves: Pyre (fire), Sapphire (frost, piercing lances) and Tempest (storm, fast bolts).
 - **Rarities:** Common, Fine, Rare and Legendary, each with a damage multiplier and a colored light beam where the weapon lies.
 - **Affixes:** Keen, Crushing, of Leeching, of Embers, Tuned, Long.
 - Enemies drop weapons: guardians always drop one, heavy knights often do, and others sometimes. The reliquary room holds one too. Walk up and press `E` to take it; if your slots are full, the weapon in your hand is left in its place.
@@ -87,10 +110,17 @@ Press `E` to trade. The camera drifts to frame him and his wares, which stand on
 
 ## Deals with the devil, and with angels
 
-When a guardian falls, something may notice. Winning without taking a hit makes it likelier.
+Deals are made in realms of their own, reached through a **rift**:
 
-- **Devil deals**: a horned idol rises from the arena floor, flanked by black braziers, offering two powerful relics. Each costs **maximum vigor**, not coin.
-- **Angel deals**: a winged saint descends in a column of light, offering two gifts for free. Take one and the other fades. Anyone who has already signed a devil's pact never sees an angel again.
+- **Where rifts open**: when a guardian falls, a rift may tear open in its arena (winning without taking a hit makes it likelier). Some floors also hide one: after enough chambers have been purged, a rift opens in one of them, with only a whisper to say so. The map marks rifts you have seen with a coloured ring.
+- **Crossing over**: walk into the rift. A short cutscene pulls the camera through it; you arrive in the realm with a letterboxed sweep of the place and the trader's entrance. `E`, `Space` or a click skips it.
+- **The Pit of Pacts** (devil): an obsidian dais over a lava sea, under a blood moon, ringed by black spires. **Malphas, the Horned Broker**, a towering goat-skulled devil, rises from a pool of fire.
+- **The Last Dawn** (angel): a white colonnade above a sea of cloud, in gold light. **Seraphine of the Last Dawn**, a faceless, six-winged saint, descends from the light.
+- **Trading** works like the merchant's shop: the camera frames the trader and their wares on stands, with the ledger beside them. They point at, watch and comment on what you browse, and react when you choose.
+  - Malphas's relics cost **maximum vigor**, not coin. While you look at one, **its price flashes on your health bar**: the part of the bar you would lose blinks red, with the amount beside it.
+  - Seraphine's gifts are free, but you may take only one; the rest fade.
+  - Anyone who has already signed a devil's pact never sees an angel again.
+- **Leaving**: step into the rift behind you to return to the floor, beside the rift you came through.
 
 ## Relics that change your build
 
@@ -215,8 +245,10 @@ src/enemies.js    Enemy base (posture, blocking, telegraphs, stun, burn), Hollow
 src/items.js      Relics (stat and build-changing; common, shop, devil and angel pools), pedestals, the descent well
 src/builds.js     BuildFX: relic procs (lightning, parry bursts, orbiting knives, halo, corpse bloom, brimstone), Sunfall, shockwaves
 src/pickups.js    Coins, keys, blood vials, wooden and gilded chests
-src/shop.js       Vael the Many-Handed (animated NPC), wares on stands, the trading camera and world-anchored shop UI
-src/deals.js      Devil and angel altars
+src/shop.js       Vael the Many-Handed (animated NPC), wares on stands, the trading camera and world-anchored trade UI (coin, vigor or gift)
+src/realm.js      Deal rifts, the Pit of Pacts and the Last Dawn, Malphas and Seraphine
+src/cutscene.js   Letterboxed camera sequences with events, title cards and fades
+src/abilities.js  Staff Arts, the Duchess's Restage, the Revenant's phantom family and thralls
 src/settings.js   Sensitivity, FOV, invert, smoothing (localStorage)
 src/hub.js        The Roundtable Hold: island terrain, the hold, sparring grounds, sea and sky
 src/classes.js    Class definitions

@@ -30,7 +30,8 @@
     <div id="wallet"><span class="coins">0</span><span class="keys">0</span></div>
 
     <div id="vitals">
-      <div id="hp-bar" class="bar hp"><div class="trail"></div><div class="fill"></div></div>
+      <div id="hp-bar" class="bar hp"><div class="trail"></div><div class="fill"></div><div class="cost hidden"></div></div>
+      <div id="hp-cost-label" class="hidden"></div>
       <div id="st-bar" class="bar st"><div class="fill"></div></div>
       <div id="mp-bar" class="bar mp hidden"><div class="fill"></div></div>
     </div>
@@ -39,7 +40,12 @@
       <div id="skill-slot" class="slot"><div class="cd"></div><span class="slot-key">Q</span><span class="slot-name"></span></div>
       <div id="ult-slot" class="slot"><div class="ult-fill"></div><span class="slot-key">R</span><span class="ult-rune"></span><span class="slot-name"></span></div>
       <div id="flask-slot" class="slot"><span class="slot-key">F</span><span class="flask-icon"></span><span class="count">3</span></div>
+      <div id="arts" class="hidden">
+        <div id="art-z" class="slot art"><div class="cd"></div><span class="slot-key">Z</span><span class="art-gem"></span><span class="slot-name"></span></div>
+        <div id="art-x" class="slot art"><div class="cd"></div><span class="slot-key">X</span><span class="art-gem"></span><span class="slot-name"></span></div>
+      </div>
     </div>
+    <div id="streak" class="hidden"><span class="sk-name">Bloodrush</span><span class="sk-count">×1</span><div class="sk-track"><div class="sk-bar"></div></div></div>
 
     <div id="loadout">
       <div id="relics"></div>
@@ -61,6 +67,10 @@
     </div>
   </div>
 
+  <div id="veil"></div>
+  <div id="letterbox"><div class="lb-top"></div><div class="lb-bottom"><span class="lb-skip">E / Space — skip</span></div></div>
+  <div id="cine-caption"><div class="cc-title"></div><div class="cc-sub"></div></div>
+
   <div id="banner"><div class="banner-text"></div></div>
 
   <div id="item-banner">
@@ -77,7 +87,7 @@
         <li><kbd>W A S D</kbd> Move &nbsp; <kbd>Shift</kbd> Sprint &nbsp; <kbd>Space</kbd> Jump</li>
         <li><kbd>Mouse</kbd> Look &nbsp; <kbd>Left Click</kbd> Attack / cast &nbsp; <kbd>Right Click</kbd> Guard</li>
         <li>Raise your guard <em>as the blow lands</em> to parry. A <span class="gleam">gleam</span> can be parried; a <span class="red">red glow</span> cannot.</li>
-        <li><kbd>Q</kbd> Class skill &nbsp; <kbd>R</kbd> Ultimate &nbsp; <kbd>F</kbd> Flask &nbsp; <kbd>E</kbd> Interact &nbsp; <kbd>1 2 3</kbd> / <kbd>Wheel</kbd> Weapons</li>
+        <li><kbd>Q</kbd> Class skill &nbsp; <kbd>R</kbd> Ultimate &nbsp; <kbd>Z</kbd><kbd>X</kbd> Staff arts (mage) &nbsp; <kbd>F</kbd> Flask &nbsp; <kbd>E</kbd> Interact &nbsp; <kbd>1 2 3</kbd> / <kbd>Wheel</kbd> Weapons</li>
         <li><kbd>G</kbd> Drop weapon &nbsp; <kbd>Tab</kbd> Inventory &nbsp; <kbd>Esc</kbd> Pause &nbsp; <kbd>M</kbd> Mute</li>
       </ul>
       <button id="start-btn">Enter the Hold</button>
@@ -123,6 +133,6 @@
 
   <div id="crt"></div>
 
-  <script type="module" src="game.js?v=5"></script>
+  <script type="module" src="game.js?v=6"></script>
 </body>
 </html>

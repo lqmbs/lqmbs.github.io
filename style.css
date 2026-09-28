@@ -528,7 +528,11 @@ kbd {
 .menu-panel { text-align: center; padding: 16px; max-width: 1100px; width: 100%; }
 .menu-title { font-family: var(--font-title); font-weight: 400; font-size: clamp(28px, 4vw, 46px); letter-spacing: 0.14em; margin: 0; color: var(--bone); }
 .menu-sub { font-style: italic; color: var(--bone-dim); margin: 6px 0 24px; font-size: 18px; }
-.class-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; text-align: left; }
+.class-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(215px, 1fr)); gap: 12px; text-align: left; }
+#menu { overflow-y: auto; align-items: flex-start; padding-top: 3vh; }
+#menu .menu-panel { max-width: 1400px; }
+.class-card .kit-row { font-size: 13px; }
+.kit-bond { color: #d8c8a0; border-top: 1px solid rgba(201, 164, 92, 0.25); padding-top: 5px; margin-top: 3px; }
 .class-card {
   position: relative;
   font: inherit;
@@ -738,3 +742,91 @@ kbd {
 #npc-bubble .npc-text { font-size: 16px; color: #efe6d6; line-height: 1.25; min-height: 1.25em; }
 
 #hud.shopping #actions, #hud.shopping #loadout, #hud.shopping #minimap, #hud.shopping #wallet, #hud.shopping #crosshair, #hud.shopping #vitals { opacity: 0; transition: opacity 0.4s; }
+/* During a devil's bargain the health bar stays up, so the price can be seen on it. */
+#hud.shopping.show-vitals #vitals { opacity: 1; }
+
+/* ---------- The price of a pact, flashing on the health bar ---------- */
+#hp-bar .cost {
+  position: absolute; top: -2px; bottom: -2px; right: 0;
+  background: repeating-linear-gradient(135deg, rgba(255, 60, 40, 0.9) 0 4px, rgba(40, 0, 0, 0.9) 4px 8px);
+  box-shadow: 0 0 10px #ff2a10;
+  animation: costflash 0.7s ease-in-out infinite;
+}
+@keyframes costflash { 50% { opacity: 0.25; } }
+#hp-cost-label {
+  font-family: var(--font-title); font-size: 13px; letter-spacing: 0.08em;
+  color: #ff5a3a; text-shadow: 0 0 8px #ff2a10, 0 1px 2px #000;
+  animation: costflash 0.7s ease-in-out infinite;
+}
+
+/* ---------- Shop themes: the devil and the angel ---------- */
+#shop[data-theme="devil"] .shop-panel { background: linear-gradient(to bottom, rgba(40, 6, 8, 0.92), rgba(10, 2, 2, 0.94)); border-color: #7a1a14; box-shadow: 0 0 0 1px #000, 0 0 40px rgba(220, 30, 10, 0.3), inset 0 0 30px rgba(0, 0, 0, 0.6); }
+#shop[data-theme="devil"] header h2 { color: #ff6a4a; text-shadow: 0 0 14px rgba(255, 40, 10, 0.7); }
+#shop[data-theme="devil"] .shop-sub { color: #b07060; }
+#shop[data-theme="devil"] .shop-row.sel { background: linear-gradient(to right, rgba(255, 40, 20, 0.22), transparent); box-shadow: inset 2px 0 0 #ff4a2a; }
+#shop[data-theme="devil"] .shop-bracket i { border-color: #ff6a4a; filter: drop-shadow(0 0 4px #ff2a10); }
+#shop[data-theme="angel"] .shop-panel { background: linear-gradient(to bottom, rgba(60, 52, 40, 0.88), rgba(24, 20, 16, 0.92)); border-color: #c8a860; box-shadow: 0 0 0 1px #000, 0 0 40px rgba(255, 230, 160, 0.3), inset 0 0 30px rgba(0, 0, 0, 0.4); }
+#shop[data-theme="angel"] header h2 { color: #fff0c0; text-shadow: 0 0 14px rgba(255, 240, 180, 0.8); }
+#shop[data-theme="angel"] .shop-sub { color: #c8b890; }
+#shop[data-theme="angel"] .shop-row.sel { background: linear-gradient(to right, rgba(255, 240, 180, 0.2), transparent); box-shadow: inset 2px 0 0 #fff0c0; }
+#shop[data-theme="angel"] .shop-bracket i { border-color: #fff0c0; filter: drop-shadow(0 0 5px #ffe080); }
+.shop-row .row-price.vigor { color: #ff5a3a; }
+.shop-row .row-price.vigor::before { background: #e02030; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); }
+.shop-row .row-price.gift { color: #fff0c0; }
+.shop-row .row-price.gift::before { background: #fff0c0; border-radius: 0; transform: rotate(45deg); }
+.wallet-vigor { color: #ff7a5a; }
+.wallet-grace { color: #fff0c0; font-style: italic; }
+#npc-bubble[data-theme="devil"] { border-color: #8a1a14; background: rgba(24, 4, 4, 0.9); box-shadow: 0 0 18px rgba(220, 30, 10, 0.4); }
+#npc-bubble[data-theme="devil"] .npc-name { color: #ff6a4a; }
+#npc-bubble[data-theme="devil"]::after { border-top-color: #8a1a14; }
+#npc-bubble[data-theme="angel"] { border-color: #c8a860; background: rgba(40, 34, 24, 0.88); box-shadow: 0 0 18px rgba(255, 230, 160, 0.4); }
+#npc-bubble[data-theme="angel"] .npc-name { color: #fff0c0; }
+#npc-bubble[data-theme="angel"]::after { border-top-color: #c8a860; }
+
+/* ---------- Cutscenes ---------- */
+#letterbox { position: fixed; inset: 0; pointer-events: none; z-index: 22; }
+#letterbox .lb-top, #letterbox .lb-bottom { position: absolute; left: 0; right: 0; height: 0; background: #000; transition: height 0.5s ease; }
+#letterbox .lb-top { top: 0; }
+#letterbox .lb-bottom { bottom: 0; display: flex; justify-content: flex-end; align-items: center; }
+#letterbox.on .lb-top, #letterbox.on .lb-bottom { height: 11vh; }
+.lb-skip { font-family: var(--font-title); font-size: 12px; letter-spacing: 0.12em; color: #5a5448; padding-right: 28px; opacity: 0; transition: opacity 0.5s 1s; }
+#letterbox.on .lb-skip { opacity: 1; }
+#hud.cinematic { opacity: 0; transition: opacity 0.3s; }
+#cine-caption {
+  position: fixed; left: 0; right: 0; bottom: 15vh; z-index: 23; text-align: center; pointer-events: none;
+  opacity: 0; transform: translateY(8px); transition: opacity 0.8s ease, transform 0.8s ease;
+}
+#cine-caption.on { opacity: 1; transform: none; }
+#cine-caption .cc-title { font-family: var(--font-title); font-size: clamp(22px, 3.4vw, 40px); letter-spacing: 0.22em; color: var(--bone); text-shadow: 0 2px 6px #000; }
+#cine-caption .cc-sub { font-style: italic; font-size: 18px; color: var(--bone-dim); margin-top: 4px; }
+#cine-caption[data-theme="devil"] .cc-title { color: #ff5a3a; text-shadow: 0 0 22px rgba(255, 30, 10, 0.8), 0 2px 4px #000; }
+#cine-caption[data-theme="angel"] .cc-title { color: #fff4d0; text-shadow: 0 0 22px rgba(255, 240, 180, 0.9), 0 2px 4px #000; }
+
+/* ---------- The Duchess's veil ---------- */
+#veil {
+  position: fixed; inset: 0; pointer-events: none; z-index: 9; opacity: 0; transition: opacity 0.6s;
+  background: radial-gradient(ellipse at center, transparent 45%, rgba(90, 40, 130, 0.55) 100%);
+  mix-blend-mode: screen;
+}
+#veil.on { opacity: 1; animation: veil 2.4s ease-in-out infinite; }
+@keyframes veil { 50% { filter: brightness(1.4); } }
+
+/* ---------- Duelist's Bloodrush ---------- */
+#streak {
+  position: absolute; left: 50%; bottom: 112px; transform: translateX(-50%);
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; justify-content: center; width: 180px;
+  font-family: var(--font-title); color: #ff6a4a; text-shadow: 0 0 10px rgba(255, 60, 30, 0.7), 0 1px 2px #000;
+}
+#streak .sk-name { font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; }
+#streak .sk-count { font-size: 20px; }
+#streak .sk-track { width: 100%; height: 3px; background: rgba(0, 0, 0, 0.6); }
+#streak .sk-bar { height: 100%; background: #ff5a3a; transform-origin: left; }
+#streak.bump { animation: bump 0.3s ease; }
+
+/* ---------- Staff Arts ---------- */
+#arts { display: flex; gap: 10px; margin-left: 12px; }
+.slot.art { border-color: color-mix(in srgb, var(--art, #888) 45%, #3a342c); }
+.slot.art .art-gem { position: absolute; top: 12px; width: 12px; height: 12px; transform: rotate(45deg); background: var(--art, #888); box-shadow: 0 0 8px var(--art, #888); opacity: 0.5; }
+.slot.art.ready .art-gem { opacity: 1; }
+.slot.art .slot-name { padding-top: 24px; position: relative; }
+.slot.art.denied { animation: drained 0.35s ease; }

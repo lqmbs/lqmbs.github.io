@@ -15,7 +15,18 @@ export const WEAPON_TYPES = {
   spear: { name: 'Winged Spear', kind: 'thrust', damage: 17, speed: 1, reach: 3.9, arc: 0.7, cost: 13, posture: 7, windup: 0.12, active: 0.11, recovery: 0.3 },
   mace: { name: 'Morning Star', kind: 'slash', damage: 22, speed: 1, reach: 2.5, arc: 1.7, cost: 17, posture: 16, windup: 0.16, active: 0.12, recovery: 0.36 },
   wand: { name: 'Ember Wand', kind: 'cast', damage: 20, speed: 1, reach: 1.8, arc: 1.4, cost: 4, manaCost: 12, posture: 3, windup: 0.16, active: 0.06, recovery: 0.26, bolt: { color: 0xff7a30, speed: 24, burn: 3 } },
-  staff: { name: 'Sapphire Staff', kind: 'cast', damage: 34, speed: 1, reach: 2.2, arc: 1.4, cost: 6, manaCost: 22, posture: 10, windup: 0.32, active: 0.08, recovery: 0.36, bolt: { color: 0x6ab8ff, speed: 30, pierce: true } },
+  staff: { name: 'Sapphire Staff', kind: 'cast', staff: true, element: 'frost', damage: 34, speed: 1, reach: 2.2, arc: 1.4, cost: 6, manaCost: 22, posture: 10, windup: 0.32, active: 0.08, recovery: 0.36, bolt: { color: 0x6ab8ff, speed: 30, pierce: true } },
+  emberstaff: { name: 'Pyre Staff', kind: 'cast', staff: true, element: 'fire', damage: 28, speed: 1, reach: 2.2, arc: 1.4, cost: 6, manaCost: 18, posture: 8, windup: 0.26, active: 0.08, recovery: 0.32, bolt: { color: 0xff6a20, speed: 26, burn: 6 } },
+  stormstaff: { name: 'Tempest Staff', kind: 'cast', staff: true, element: 'storm', damage: 24, speed: 1, reach: 2.2, arc: 1.4, cost: 6, manaCost: 16, posture: 12, windup: 0.2, active: 0.06, recovery: 0.28, bolt: { color: 0xc8e8ff, speed: 40 } },
+  rapier: { name: 'Duchess Rapier', kind: 'thrust', damage: 14, speed: 1, reach: 3.1, arc: 0.8, cost: 9, posture: 5, windup: 0.07, active: 0.09, recovery: 0.2 },
+  scythe: { name: 'Grave Scythe', kind: 'heavy', damage: 27, speed: 1, reach: 3.4, arc: 2.6, cost: 19, posture: 12, windup: 0.22, active: 0.15, recovery: 0.38 },
+};
+
+/** Elements of the mage's staves: each unlocks two Staff Arts for a Lantern Mage. */
+export const ELEMENTS = {
+  fire: { name: 'Fire', color: 0xff6a20 },
+  frost: { name: 'Frost', color: 0x7ac8ff },
+  storm: { name: 'Storm', color: 0xd8f0ff },
 };
 
 export const RARITIES = [
@@ -137,6 +148,37 @@ export function buildWeaponModel(typeId, M, glowColor = null) {
       tip.userData.tip = true;
       break;
     }
+    case 'emberstaff': {
+      part(g, new THREE.CylinderGeometry(0.03, 0.036, 1.8, 6), M.dark, 0, 0.42, 0);
+      for (let i = 0; i < 4; i++) {
+        const a = (i / 4) * Math.PI * 2;
+        part(g, new THREE.ConeGeometry(0.03, 0.3, 4), M.gold, Math.cos(a) * 0.08, 1.4, Math.sin(a) * 0.08, Math.sin(a) * 0.5, 0, -Math.cos(a) * 0.5);
+      }
+      const tip = part(g, new THREE.IcosahedronGeometry(0.09, 0), new THREE.MeshBasicMaterial({ color: glowColor ?? 0xff6a20 }), 0, 1.45, 0);
+      tip.userData.tip = true;
+      break;
+    }
+    case 'stormstaff': {
+      part(g, new THREE.CylinderGeometry(0.026, 0.032, 1.9, 6), M.wood, 0, 0.45, 0);
+      for (let i = 0; i < 3; i++) part(g, B(0.2 - i * 0.05, 0.02, 0.02), M.steel, 0.02, 1.25 + i * 0.1, 0, 0, 0, 0.5 - i * 0.3);
+      part(g, new THREE.TorusGeometry(0.1, 0.015, 4, 10), M.steel, 0, 1.55, 0);
+      const tip = part(g, new THREE.OctahedronGeometry(0.06), new THREE.MeshBasicMaterial({ color: glowColor ?? 0xd8f0ff }), 0, 1.55, 0);
+      tip.userData.tip = true;
+      break;
+    }
+    case 'rapier':
+      part(g, B(0.04, 0.16, 0.04), M.leather, 0, 0.07, 0);
+      part(g, new THREE.TorusGeometry(0.07, 0.012, 4, 10, Math.PI), M.gold, 0, 0.1, 0.02, 0, Math.PI / 2, 0);
+      part(g, B(0.22, 0.025, 0.03), M.gold, 0, 0.17, 0);
+      part(g, B(0.022, 1.1, 0.012), M.steel, 0, 0.74, 0);
+      part(g, new THREE.ConeGeometry(0.012, 0.08, 4), M.steel, 0, 1.33, 0);
+      break;
+    case 'scythe':
+      part(g, new THREE.CylinderGeometry(0.028, 0.03, 1.9, 6), M.wood, 0, 0.45, 0, 0, 0, 0.04);
+      part(g, B(0.06, 0.06, 0.06), M.dark, 0, 1.38, 0);
+      part(g, new THREE.TorusGeometry(0.4, 0.035, 3, 12, Math.PI * 0.65), M.steel, -0.35, 1.2, 0, 0, 0, 0.6);
+      part(g, new THREE.ConeGeometry(0.025, 0.14, 4), M.steel, -0.72, 0.98, 0, 0, 0, 2.4);
+      break;
     case 'staff': {
       part(g, new THREE.CylinderGeometry(0.028, 0.034, 1.9, 6), M.wood, 0, 0.45, 0);
       for (let i = 0; i < 3; i++) {

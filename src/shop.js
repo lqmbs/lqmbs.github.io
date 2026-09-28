@@ -27,17 +27,21 @@ const LINES = {
 // Speech bubble — floats above the merchant's head, in the world or in the shop.
 // ============================================================================
 
-class Bubble {
-  constructor() {
+export class Bubble {
+  constructor(name = MERCHANT_NAME, theme = 'merchant') {
     this.el = document.getElementById('npc-bubble');
     this.textEl = this.el.querySelector('.npc-text');
-    this.el.querySelector('.npc-name').textContent = MERCHANT_NAME;
+    this.name = name;
+    this.theme = theme;
     this.full = '';
     this.shown = 0;
     this.timer = 0;
   }
 
   say(text, game) {
+    // One bubble element is shared by every speaker; claim it.
+    this.el.querySelector('.npc-name').textContent = this.name;
+    this.el.dataset.theme = this.theme;
     this.full = text;
     this.shown = 0;
     this.timer = 2.2 + text.length * 0.045;
@@ -446,7 +450,7 @@ export class Merchant {
 // Wares on display — real objects on velvet stands, with price tags in the world.
 // ============================================================================
 
-function priceTexture(text, color) {
+function priceTexture(text, color, mode = 'coin') {
   const c = document.createElement('canvas');
   c.width = 128; c.height = 48;
   const g = c.getContext('2d');
@@ -455,9 +459,17 @@ function priceTexture(text, color) {
   g.strokeStyle = color;
   g.lineWidth = 2;
   g.strokeRect(9, 9, 110, 30);
-  g.fillStyle = '#f0c040';
+  // The currency glyph: a coin, a drop of blood, or a star of grace.
+  g.fillStyle = mode === 'vigor' ? '#e02030' : mode === 'gift' ? '#fff0c0' : '#f0c040';
   g.beginPath();
-  g.arc(32, 24, 8, 0, TAU);
+  if (mode === 'vigor') {
+    g.moveTo(32, 13); g.quadraticCurveTo(42, 26, 32, 34); g.quadraticCurveTo(22, 26, 32, 13);
+  } else if (mode === 'gift') {
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * TAU, r = i % 2 ? 4 : 10;
+      g.lineTo(32 + Math.cos(a) * r, 24 + Math.sin(a) * r);
+    }
+  } else g.arc(32, 24, 8, 0, TAU);
   g.fill();
   g.fillStyle = '#f0e6d0';
   g.font = 'bold 22px Georgia, serif';
@@ -490,9 +502,10 @@ class Ware {
       this.group.add(m);
       return m;
     };
-    add(new THREE.CylinderGeometry(0.34, 0.42, 0.9, 6), M.trim, 0.45);
-    add(new THREE.BoxGeometry(0.62, 0.08, 0.62), M.cloth, 0.93).rotation.y = Math.PI / 4;
-    this.ringMat = new THREE.MeshBasicMaterial({ color: 0xd8b0ff, transparent: true, opacity: 0.2, blending: THREE.AdditiveBlending, depthWrite: false, fog: false });
+    const stand = shop.stand;
+    add(new THREE.CylinderGeometry(0.34, 0.42, 0.9, 6), stand === 'obsidian' ? M.iron : stand === 'marble' ? M.wax : M.trim, 0.45);
+    add(new THREE.BoxGeometry(0.62, 0.08, 0.62), stand === 'marble' ? M.gold : stand === 'obsidian' ? M.bloodGlow : M.cloth, 0.93).rotation.y = Math.PI / 4;
+    this.ringMat = new THREE.MeshBasicMaterial({ color: shop.ringColor, transparent: true, opacity: 0.2, blending: THREE.AdditiveBlending, depthWrite: false, fog: false });
     const ring = new THREE.Mesh(new THREE.RingGeometry(0.46, 0.55, 24).rotateX(-Math.PI / 2), this.ringMat);
     ring.position.y = 0.02;
     this.group.add(ring);
@@ -500,7 +513,8 @@ class Ware {
     this.model.position.y = 1.35;
     this.group.add(this.model);
     this.model.add(this.buildModel());
-    this.tag = new THREE.Sprite(new THREE.SpriteMaterial({ map: priceTexture(String(spec.price), spec.color), fog: false, depthTest: true, transparent: true }));
+    const label = shop.mode === 'vigor' ? `-${spec.price}` : shop.mode === 'gift' ? 'gift' : String(spec.price);
+    this.tag = new THREE.Sprite(new THREE.SpriteMaterial({ map: priceTexture(label, spec.color, shop.mode), fog: false, depthTest: true, transparent: true }));
     this.tag.scale.set(0.62, 0.23, 1);
     this.tag.position.y = 2.0;
     this.group.add(this.tag);
@@ -560,14 +574,31 @@ class Ware {
     this.sold = true;
     this.model.visible = false;
   }
+
+  /** An angel's unchosen gift dissolves into motes. */
+  fade() {
+    this.markSold();
+    this.faded = true;
+    const p = this.anchor;
+    this.shop.game.glow.burst(p, 26, () => ({
+      vel: new THREE.Vector3(rand(-1, 1), rand(1, 3), rand(-1, 1)), life: rand(0.8, 1.6), size: 0.05, color: 0xfff0c0, drag: 1,
+    }));
+  }
 }
 
 // ============================================================================
 // The shop itself: stock, the trading camera, and the HTML layer that ties UI, world and NPC.
 // ============================================================================
 
+/**
+ * A trading view. The merchant's shop uses it with coin; the devil's and angel's realms reuse it
+ * with other currencies:
+ *   mode 'coin'  — prices in coin
+ *   mode 'vigor' — prices in maximum health (the HP bar previews the loss)
+ *   mode 'gift'  — free, but choosing one makes the rest fade
+ */
 export class Shop {
-  constructor(game, chamber, x, y, z, facing) {
+  constructor(game, chamber, x, y, z, facing, opts = {}) {
     this.game = game;
     this.chamber = chamber;
     this.open = false;
@@ -575,10 +606,18 @@ export class Shop {
     this.facing = facing;
     this.fwd = new THREE.Vector3(Math.sin(facing), 0, Math.cos(facing));
     this.lat = new THREE.Vector3(this.fwd.z, 0, -this.fwd.x);
-    this.merchant = new Merchant(game, chamber, x, y, z, facing);
+    this.mode = opts.mode ?? 'coin';
+    this.title = opts.title ?? "Vael's Curios";
+    this.subtitle = opts.subtitle ?? 'A wandering merchant of the deep';
+    this.theme = opts.theme ?? 'merchant';
+    this.stand = opts.stand ?? 'velvet';
+    this.ringColor = opts.ringColor ?? 0xd8b0ff;
+    this.cam = { dist: 6.2, side: 1.6, height: 2.3, lookFwd: 1.8, lookSide: 2.4, lookHeight: 1.3, ...(opts.cam || {}) };
+    this.merchant = opts.npc ? opts.npc(this) : new Merchant(game, chamber, x, y, z, facing);
     this.sel = 0;
     this.camK = 0;
-    this.stockWares();
+    if (opts.specs) this.placeWares(opts.specs, opts.radius ?? 3.1, opts.spread ?? 1.9);
+    else this.stockWares();
     this.bindUI();
   }
 
@@ -592,10 +631,14 @@ export class Shop {
     specs.push(Math.random() < 0.5
       ? { kind: 'flask', name: 'Crimson Refill', desc: 'Refills one Crimson Flask', lore: LINES.flask, price: 7, color: '#e0203a' }
       : { kind: 'vial', name: 'Blood Vial', desc: 'Restores 35 health at once', lore: LINES.vial, price: 4, color: '#e0203a' });
+    this.placeWares(specs, 3.1, 1.9);
+  }
+
+  /** Stands in an arc in front of the trader. */
+  placeWares(specs, r, spread) {
     const n = specs.length;
     this.wares = specs.map((s, i) => {
-      const a = ((i - (n - 1) / 2) / (n - 1)) * 1.9;
-      const r = 3.1;
+      const a = n > 1 ? ((i - (n - 1) / 2) / (n - 1)) * spread : 0;
       const pos = this.base.clone()
         .addScaledVector(this.fwd, Math.cos(a) * r)
         .addScaledVector(this.lat, Math.sin(a) * r);
@@ -615,6 +658,8 @@ export class Shop {
       tags: root.querySelector('.shop-tags'),
       bracket: root.querySelector('.shop-bracket'),
       leave: root.querySelector('.shop-leave'),
+      title: root.querySelector('header h2'),
+      sub: root.querySelector('.shop-sub'),
     };
     const ui = Shop.ui;
     ui.leave.addEventListener('click', () => this.game.shop?.close());
@@ -666,18 +711,23 @@ export class Shop {
     this.camFrom = { pos: game.camera.position.clone(), quat: game.camera.quaternion.clone() };
     // Frame the merchant and his wares on the left; the ledger fills the right of the screen.
     // (`lat` is the camera's right-hand side, so aiming to the right pushes him left.)
-    const M = this.base;
-    this.camPos = M.clone().addScaledVector(this.fwd, 6.2).addScaledVector(this.lat, 1.6).add(_v.set(0, 2.3, 0));
-    const lookAt = M.clone().addScaledVector(this.fwd, 1.8).addScaledVector(this.lat, 2.4).add(_v.set(0, 1.3, 0));
+    const M = this.base, C = this.cam;
+    this.camPos = M.clone().addScaledVector(this.fwd, C.dist).addScaledVector(this.lat, C.side).add(_v.set(0, C.height, 0));
+    const lookAt = M.clone().addScaledVector(this.fwd, C.lookFwd).addScaledVector(this.lat, C.lookSide).add(_v.set(0, C.lookHeight, 0));
     this.camLook = lookAt;
     this.camQuat = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().lookAt(this.camPos, lookAt, new THREE.Vector3(0, 1, 0)));
     const first = this.wares.findIndex((w) => !w.sold);
     this.select(first >= 0 ? first : 0, true);
     this.merchant.say('open');
     this.merchant.setMood('greet');
-    game.audio.play('merchant');
-    Shop.ui.root.classList.remove('hidden');
+    game.audio.play(this.merchant.voice ?? 'merchant');
+    const ui = Shop.ui;
+    ui.root.dataset.theme = this.theme;
+    ui.title.textContent = this.title;
+    ui.sub.textContent = this.subtitle;
+    ui.root.classList.remove('hidden');
     game.hud.root.classList.add('shopping');
+    game.hud.root.classList.toggle('show-vitals', this.mode === 'vigor');
     this.buildTags();
     this.render();
   }
@@ -690,7 +740,8 @@ export class Shop {
     this.merchant.pointTarget = null;
     this.merchant.lookTarget = null;
     Shop.ui.root.classList.add('hidden');
-    this.game.hud.root.classList.remove('shopping');
+    this.game.hud.root.classList.remove('shopping', 'show-vitals');
+    this.game.hud.setHpCost(null);
     this.game.renderer.domElement.style.cursor = '';
   }
 
@@ -700,12 +751,22 @@ export class Shop {
     const w = this.wares[this.sel];
     this.merchant.pointTarget = w.anchor;
     this.merchant.lookTarget = w.anchor;
+    // A pact's price flashes on the health bar before it is paid.
+    if (this.mode === 'vigor') this.game.hud.setHpCost(w.sold ? null : w.spec.price);
     if (!quiet) {
       this.game.audio.play('tick');
       if (!w.sold) this.merchant.say(null, w.spec.kind === 'item' ? `${w.spec.name}... ${w.spec.lore}` : w.spec.lore);
       this.merchant.setMood('point');
     }
     this.render();
+  }
+
+  /** Can the customer pay for this? */
+  affordable(spec) {
+    const p = this.game.player;
+    if (this.mode === 'vigor') return p.stats.maxHp - spec.price >= 20;
+    if (this.mode === 'gift') return true;
+    return p.coins >= spec.price;
   }
 
   buy() {
@@ -716,7 +777,7 @@ export class Shop {
       game.audio.play('empty');
       return;
     }
-    if (p.coins < w.spec.price) {
+    if (!this.affordable(w.spec)) {
       this.merchant.say('poor');
       this.merchant.setMood('refuse');
       game.audio.play('locked');
@@ -725,8 +786,20 @@ export class Shop {
       Shop.ui.wallet.classList.add('denied');
       return;
     }
-    p.coins -= w.spec.price;
     const s = w.spec;
+    if (this.mode === 'vigor') {
+      p.stats.maxHp -= s.price;
+      p.hp = Math.min(p.hp, p.stats.maxHp);
+      p.devilDeals++;
+      game.hurtFlash = 0.9;
+      game.shake(0.3);
+      game.audio.play('devil');
+      game.hud.setHpCost(null);
+    } else if (this.mode === 'gift') {
+      game.audio.play('angel');
+      // Grace given once: the other gifts fade away.
+      for (const other of this.wares) if (other !== w && !other.sold) other.fade();
+    } else p.coins -= s.price;
     switch (s.kind) {
       case 'item': game.onItemPickup(s.item); break;
       case 'weapon': {
@@ -742,13 +815,14 @@ export class Shop {
     w.markSold();
     this.merchant.say('buy');
     this.merchant.setMood('delight');
-    game.audio.play('buy');
-    // Coins stream from the customer's purse into the merchant's greedy hands.
+    if (this.mode === 'coin') game.audio.play('buy');
+    // Payment streams from the customer to the trader: coin, blood, or light.
     const from = w.anchor;
     const to = this.merchant.headWorld().add(_v.set(0, -0.8, 0));
+    const pay = this.mode === 'vigor' ? [0xe02030, 0x800010] : this.mode === 'gift' ? [0xfff0c0, 0xffffff] : [0xf0c040, 0xffe080];
     for (let k = 0; k < 24; k++) {
       const q = from.clone().lerp(to, k / 24);
-      game.glow.emit({ pos: q, vel: new THREE.Vector3(rand(-0.5, 0.5), rand(0.5, 2), rand(-0.5, 0.5)), life: rand(0.4, 0.9), size: rand(0.04, 0.07), color: pick([0xf0c040, 0xffe080]) });
+      game.glow.emit({ pos: q, vel: new THREE.Vector3(rand(-0.5, 0.5), rand(0.5, 2), rand(-0.5, 0.5)), life: rand(0.4, 0.9), size: rand(0.04, 0.07), color: pick(pay) });
     }
     game.glow.burst(from, 30, () => ({
       vel: new THREE.Vector3(rand(-2, 2), rand(1, 4), rand(-2, 2)), life: rand(0.5, 1), size: rand(0.04, 0.08), color: this.wares[this.sel].spec.kind === 'item' ? s.item.color : 0xf0c040, drag: 2,
@@ -762,24 +836,37 @@ export class Shop {
   render() {
     const ui = Shop.ui, p = this.game.player;
     ui.wallet.innerHTML = '';
-    const coin = document.createElement('span');
-    coin.className = 'wallet-coins';
-    coin.textContent = p.coins;
-    const key = document.createElement('span');
-    key.className = 'wallet-keys';
-    key.textContent = p.keys;
-    ui.wallet.append(coin, key);
+    if (this.mode === 'vigor') {
+      const v = document.createElement('span');
+      v.className = 'wallet-vigor';
+      v.textContent = `${Math.ceil(p.hp)} / ${p.stats.maxHp} vigor`;
+      ui.wallet.append(v);
+    } else if (this.mode === 'gift') {
+      const g = document.createElement('span');
+      g.className = 'wallet-grace';
+      g.textContent = this.wares.some((w) => w.sold) ? 'Grace received' : 'Choose one gift';
+      ui.wallet.append(g);
+    } else {
+      const coin = document.createElement('span');
+      coin.className = 'wallet-coins';
+      coin.textContent = p.coins;
+      const key = document.createElement('span');
+      key.className = 'wallet-keys';
+      key.textContent = p.keys;
+      ui.wallet.append(coin, key);
+    }
     ui.list.replaceChildren();
+    const soldWord = this.mode === 'vigor' ? 'Sealed' : this.mode === 'gift' ? (/* chosen or faded */ '') : 'Sold';
     this.wares.forEach((w, i) => {
       const li = document.createElement('li');
-      li.className = `shop-row${i === this.sel ? ' sel' : ''}${w.sold ? ' sold' : ''}${!w.sold && p.coins < w.spec.price ? ' poor' : ''}`;
+      li.className = `shop-row${i === this.sel ? ' sel' : ''}${w.sold ? ' sold' : ''}${!w.sold && !this.affordable(w.spec) ? ' poor' : ''}`;
       const name = document.createElement('span');
       name.className = 'row-name';
       name.textContent = w.spec.name;
       name.style.color = w.sold ? '' : w.spec.color;
       const price = document.createElement('span');
-      price.className = 'row-price';
-      price.textContent = w.sold ? 'Sold' : w.spec.price;
+      price.className = `row-price ${this.mode}`;
+      price.textContent = w.sold ? (soldWord || (w.faded ? 'Faded' : 'Chosen')) : this.mode === 'vigor' ? `−${w.spec.price} max` : this.mode === 'gift' ? 'Gift' : w.spec.price;
       li.append(name, price);
       li.addEventListener('mouseenter', () => { if (this.sel !== i) this.select(i); });
       li.addEventListener('click', () => { this.select(i, true); this.buy(); });
@@ -793,7 +880,7 @@ export class Shop {
     h.style.color = w.spec.color;
     const d = document.createElement('div');
     d.className = 'detail-desc';
-    d.textContent = w.sold ? 'Already sold.' : w.spec.desc;
+    d.textContent = w.sold ? (w.faded ? 'It faded when you chose another.' : 'Already taken.') : w.spec.desc;
     ui.detail.append(h, d);
     if (w.spec.kind === 'item' && w.spec.item.mech) {
       const tag = document.createElement('div');

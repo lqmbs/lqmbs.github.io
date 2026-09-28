@@ -25,6 +25,9 @@ export class DungeonFloor {
     this.grassSpots = [];
     this.active = [];
     this.activeEnemies = [];
+    // Now and then a rift to a deal realm lies hidden on the floor, opening once enough falls.
+    this.hiddenPortal = Math.random() < 0.35;
+    this.cleared = 0;
     this.root = new THREE.Group();
     game.scene.add(this.root);
     this.generate();

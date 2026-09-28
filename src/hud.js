@@ -59,7 +59,35 @@ export class HUD {
     this.coinsEl = $('#wallet .coins');
     this.keysEl = $('#wallet .keys');
     this.walletEl = $('#wallet');
+    this.hpCost = $('#hp-bar .cost');
+    this.hpCostLabel = $('#hp-cost-label');
+    this.veilEl = $('#veil');
+    this.streakEl = $('#streak');
+    this.artsEl = $('#arts');
+    this.artSlots = [$('#art-z'), $('#art-x')];
+    this.artKey = '';
   }
+
+  /** Flashing preview of the maximum vigor a devil's pact would take. */
+  setHpCost(cost) {
+    this.hpCostValue = cost;
+    const on = cost != null;
+    this.hpCost.classList.toggle('hidden', !on);
+    this.hpCostLabel.classList.toggle('hidden', !on);
+    if (on) this.hpCostLabel.textContent = `−${cost} max vigor`;
+  }
+
+  setVeil(on) { this.veilEl.classList.toggle('on', on); }
+
+  streak(n) {
+    this.streakEl.classList.toggle('hidden', n <= 0);
+    if (n > 0) {
+      this.streakEl.querySelector('.sk-count').textContent = `×${n}`;
+      this.pulse(this.streakEl, 'bump');
+    }
+  }
+
+  flashArt(slot) { this.pulse(this.artSlots[slot], 'denied'); }
 
   flashUlt() { this.pulse(this.ultSlot, 'denied'); }
   ultReady() { this.pulse(this.ultSlot, 'burst'); }
@@ -258,6 +286,29 @@ export class HUD {
 
   update(dt, player, camera) {
     if (player.stats.maxMana) this.mpFill.style.transform = `scaleX(${clamp(player.mana / player.stats.maxMana, 0, 1)})`;
+    if (this.hpCostValue != null) this.hpCost.style.width = `${clamp(this.hpCostValue / player.stats.maxHp, 0, 1) * 100}%`;
+    // Staff Arts (Lantern Mage holding a staff): two element-coloured slots on Z and X.
+    const arts = player.arts.arts;
+    const key = arts ? arts.map((a) => a.id).join() : '';
+    if (key !== this.artKey) {
+      this.artKey = key;
+      this.artsEl.classList.toggle('hidden', !arts);
+      if (arts) {
+        const color = { fire: '#ff7a30', frost: '#9ad8ff', storm: '#e0f0ff' }[player.weapon.element];
+        arts.forEach((a, i) => {
+          this.artSlots[i].querySelector('.slot-name').textContent = a.name;
+          this.artSlots[i].style.setProperty('--art', color);
+        });
+      }
+    }
+    if (arts) {
+      arts.forEach((a, i) => {
+        const cd = clamp(player.arts.cd[i] / a.cooldown, 0, 1);
+        this.artSlots[i].querySelector('.cd').style.background = cd > 0 ? `conic-gradient(rgba(0,0,0,0.72) ${cd * 360}deg, transparent 0)` : 'transparent';
+        this.artSlots[i].classList.toggle('ready', cd === 0 && player.mana >= a.mana);
+      });
+    }
+    if (player.streakTimer > 0) this.streakEl.querySelector('.sk-bar').style.transform = `scaleX(${player.streakTimer / 4})`;
     const u = clamp(player.ultCharge / player.ultMax, 0, 1);
     this.ultFill.style.transform = `scaleY(${u})`;
     this.ultSlot.classList.toggle('ready', u >= 1);
@@ -438,9 +489,13 @@ export class HUD {
         ctx.fillRect(cx - 1, cy - 1, 3, 3);
         break;
     }
-    if (r.deal && !r.deal.pedestals.every((p) => p.taken)) {
-      ctx.fillStyle = r.deal.kind === 'devil' ? '#ff3010' : '#fff0c0';
-      ctx.fillRect(cx + 5, cy - 8, 3, 3);
+    if (r.portal && !r.portal.used) {
+      // A rift: a small ring in its colour.
+      ctx.strokeStyle = r.portal.kind === 'devil' ? '#ff3010' : '#fff0c0';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(cx + 6, cy - 6, 3, 0, Math.PI * 2);
+      ctx.stroke();
     }
   }
 }

@@ -8,7 +8,7 @@ import { WeaponDrop } from './loot.js';
 import { rollWeapon } from './weapons.js';
 import { Chest, Pickup, dropCoins } from './pickups.js';
 import { Shop } from './shop.js';
-import { DealAltar } from './deals.js';
+import { DealPortal } from './realm.js';
 import { Warden, pickEnemyType, eliteGroup, separateEnemies } from './enemies.js';
 import { R, along, latOf, linkIslands, COMBAT_LAYOUTS, SPECIAL_LAYOUTS } from './layouts.js';
 
@@ -612,6 +612,7 @@ export class Chamber {
         dropCoins(game, this, c.clone().setY(c.y + 0.5), randInt(3, 6) + game.depth);
         if (chance(0.5)) new Pickup(game, this, chance(0.5) ? 'key' : 'vial', c.clone().setY(c.y + 0.5));
       }
+      this.maybeHiddenPortal();
     }
   }
 
@@ -620,15 +621,40 @@ export class Chamber {
    * noticed; anyone who has already signed a pact never sees an angel again.
    */
   offerDeal() {
-    const game = this.game, p = game.player;
+    const game = this.game;
     const odds = 0.4 + (game.tookDamage ? 0 : 0.35) + (game.depth > 1 ? 0.1 : 0);
     if (!chance(odds)) return;
-    const kind = p.devilDeals > 0 ? 'devil' : chance(0.42) ? 'angel' : 'devil';
     const free = ['e', 'w', 'n', 's'].filter((d) => !this.neighbors[d]);
     const dir = free[0] ?? 'e';
     const [x, z] = along(dir, 9.5);
     const d = DIRS[dir];
-    this.deal = new DealAltar(this, kind, x + this.ox, this.center.y, z + this.oz, Math.atan2(-d.x, -d.z));
+    this.openPortal(x + this.ox, this.center.y, z + this.oz, Math.atan2(-d.x, -d.z));
+  }
+
+  /** A rift to the devil's or the angel's realm tears open here. */
+  openPortal(x, y, z, facing, hidden = false) {
+    const game = this.game;
+    const kind = game.player.devilDeals > 0 ? 'devil' : chance(0.42) ? 'angel' : 'devil';
+    this.portal = new DealPortal(game, this, kind, x, y, z, facing);
+    if (hidden) game.hud.toast('Something stirs', 'A rift has opened somewhere on this floor', kind === 'devil' ? 0xff4030 : 0xfff0c0);
+    else game.hud.banner(kind === 'devil' ? 'A DARK RIFT OPENS' : 'A RADIANT RIFT OPENS', kind, 3);
+  }
+
+  /** The rare hidden rift: once enough chambers have fallen, it opens in one of them. */
+  maybeHiddenPortal() {
+    const f = this.floor;
+    f.cleared = (f.cleared || 0) + 1;
+    if (!f.hiddenPortal || f.hiddenPortalOpened || f.cleared < 3) return;
+    f.hiddenPortalOpened = true;
+    const c = this.worldCenter();
+    let best = null;
+    for (let i = 0; i < 20; i++) {
+      const p = this.spawnPoint(0);
+      const d = Math.hypot(p.x - c.x, p.z - c.z);
+      if (d > 5 && (!best || Math.abs(d - 8) < Math.abs(best.d - 8))) best = { ...p, d };
+    }
+    if (!best) return;
+    this.openPortal(best.x, best.y, best.z, Math.atan2(c.x - best.x, c.z - best.z), true);
   }
 
   /** Called for every chamber near the knight; `current` is true for the one they stand in. */
@@ -665,7 +691,7 @@ export class Chamber {
 
     this.pedestal?.update(dt);
     this.descent?.update(dt);
-    this.deal?.update(dt);
+    this.portal?.update(dt);
     this.shop?.tick(dt);
     for (const l of this.locks) l.update(dt);
     for (const l of this.loot) l.update(dt);

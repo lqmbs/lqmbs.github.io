@@ -379,6 +379,37 @@ export class AudioEngine {
         for (let i = 0; i < 5; i++) this.tone({ t: i * 0.05, dur: 0.1, type: 'square', f: 1400 + i * 180, gain: 0.025 });
         this.metal(1200, 0.6, 0.04, 0.2);
         break;
+      case 'portal':
+        this.noise({ dur: 1.4, type: 'bandpass', f: 200, f2: 2600, q: 1.2, gain: 0.22, attack: 0.4 });
+        this.tone({ dur: 1.4, type: 'sine', f: 90, f2: 30, gain: 0.15, attack: 0.2 });
+        break;
+      case 'broker':
+        // A deep, amused growl.
+        this.tone({ dur: 0.9, type: 'sawtooth', f: 62, f2: 48, gain: 0.12, attack: 0.05 });
+        this.noise({ dur: 0.7, type: 'lowpass', f: 300, gain: 0.12 });
+        for (let i = 0; i < 3; i++) this.tone({ t: 0.3 + i * 0.14, dur: 0.1, type: 'sawtooth', f: 90 - i * 8, gain: 0.07 });
+        break;
+      case 'seraph':
+        for (const [f, t] of [[784, 0], [988, 0.1], [1175, 0.2]]) this.tone({ t, dur: 1.4, type: 'sine', f, gain: 0.03, attack: 0.2, dest: this.reverb });
+        break;
+      case 'streak':
+        this.tone({ dur: 0.12, type: 'triangle', f: 660, f2: 990, gain: 0.05 });
+        break;
+      case 'restage':
+        for (let i = 0; i < 3; i++) this.tone({ t: i * 0.06, dur: 0.3, type: 'triangle', f: 440 * (1 + i * 0.5), gain: 0.04 });
+        this.noise({ dur: 0.5, type: 'bandpass', f: 3000, f2: 800, q: 2, gain: 0.08 });
+        break;
+      case 'summon':
+        this.tone({ dur: 1.2, type: 'sine', f: 220, f2: 330, gain: 0.06, attack: 0.3, dest: this.reverb });
+        this.tone({ dur: 1.2, type: 'sine', f: 277, f2: 415, gain: 0.05, attack: 0.3, dest: this.reverb });
+        this.noise({ dur: 0.8, type: 'highpass', f: 2000, gain: 0.04, attack: 0.2 });
+        break;
+      case 'vanish':
+        this.noise({ dur: 0.8, type: 'bandpass', f: 2400, f2: 300, q: 1.5, gain: 0.14 });
+        break;
+      case 'reveal':
+        this.noise({ dur: 0.4, type: 'bandpass', f: 300, f2: 2000, q: 1.5, gain: 0.1 });
+        break;
     }
   }
 

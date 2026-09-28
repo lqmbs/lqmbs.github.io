@@ -1,10 +1,11 @@
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
 import { clamp, damp, lerp, rand, easeOut, angleDiff, flicker } from './util.js';
-import { CLASSES } from './classes.js';
+import { CLASSES, hasAffinity } from './classes.js';
 import { makeWeapon, buildWeaponModel, buildShieldModel, weaponMaterials } from './weapons.js';
 import { BuildFX, Shockwave } from './builds.js';
 import { GroundTelegraph } from './enemies.js';
+import { StaffArts, Restage, Summoner } from './abilities.js';
 
 const _fwd = new THREE.Vector3();
 const _right = new THREE.Vector3();
@@ -38,6 +39,9 @@ export class Player {
 
     this.viewmodel = new Viewmodel(game, this);
     this.fx = new BuildFX(game, this);
+    this.arts = new StaffArts(game, this);
+    this.restage = new Restage(game, this);
+    this.summoner = new Summoner(game, this);
     this.prevLook = [0, 0];
     this.yaw = 0;
     this.pitch = 0;
@@ -107,15 +111,40 @@ export class Player {
     this.stepDist = 0;
     this.sprinting = false;
     this.deathK = 0;
+    this.streak = 0;
+    this.streakTimer = 0;
+    this.hidden = false;
+    this.hideTimer = 0;
+    this.arts.cd = [0, 0];
+    this.restage.log.length = 0;
+    this.restage.queue.length = 0;
+    this.summoner.clear();
     this.viewmodel.equip();
     this.fx.reset();
   }
+
+  /** Is the class-weapon bond active for the weapon in hand? */
+  get bonded() { return hasAffinity(this); }
+
+  /** Duelist's Bloodrush: kills in quick succession with twin daggers stack speed. */
+  onKill(e) {
+    if (this.classDef.id === 'duelist' && this.bonded) {
+      this.streak = Math.min(5, (this.streakTimer > 0 ? this.streak : 0) + 1);
+      this.streakTimer = 4;
+      this.game.hud.streak(this.streak);
+      this.game.audio.play('streak');
+    }
+    this.summoner.onKill(e);
+  }
+
+  get streakMult() { return this.streakTimer > 0 ? 1 + this.streak * 0.08 : 1; }
 
   reset() { this.resetLoadout(); }
 
   get weapon() { return this.weapons[this.activeSlot]; }
   get offhand() {
     if (this.weapon.dual) return 'dagger';
+    if (this.classDef.offhand === 'parrydagger') return 'dagger';
     return this.classDef.offhand === 'dagger' ? 'lantern' : this.classDef.offhand;
   }
 
@@ -241,11 +270,27 @@ export class Player {
       this.viewmodel.kick(0.4);
       return 'blocked';
     }
+    if (this.hyperarmor()) {
+      // Vigil Knight with a longsword: the blow lands, but the cut goes on.
+      this.hurt(damage * 0.7);
+      this.invuln = 0.25;
+      this.game.sparks(this.eyePosition.addScaledVector(this.forward, 0.5), 14, 0xffe0a0, 3);
+      this.game.audio.play('shield-block');
+      this.viewmodel.kick(0.2);
+      return 'hit';
+    }
     this.hurt(damage);
     this.invuln = CONFIG.player.hurtIframes;
     this.pushFrom(src, 6);
     if (this.alive) this.setState('hurt');
     return 'hit';
+  }
+
+  /** Unbroken Stance: longsword swings (windup and cut) can't be interrupted. */
+  hyperarmor() {
+    if (this.classDef.id !== 'knight' || !this.bonded || this.state !== 'attack') return false;
+    const { windup, active } = this.attackTimings();
+    return this.stateTime < windup + active + 0.05;
   }
 
   /** Lose health (after relic multipliers); an Aegis of Mercy may refuse a killing blow. */
@@ -280,7 +325,7 @@ export class Player {
 
   attackTimings() {
     const w = this.weapon;
-    const s = w.speed * this.stats.attackSpeed * this.fx.attackSpeedBonus();
+    const s = w.speed * this.stats.attackSpeed * this.fx.attackSpeedBonus() * (1 + (this.streakMult - 1) * 0.75);
     return { windup: w.windup / s, active: w.active / s, recovery: w.recovery / s };
   }
 
@@ -347,8 +392,10 @@ export class Player {
       if (d > e.radius + 0.5 && Math.abs(angleDiff(this.yaw, yawOf(dx, dz))) > w.arc / 2) continue;
       this.hitSet.add(e);
       const dir = new THREE.Vector3(dx / (d || 1), 0, dz / (d || 1));
-      const dmg = w.damage * this.stats.damageMult * this.fx.damageBonus() * rand(0.9, 1.1);
-      const result = e.receiveHit(dmg, dir, this, { posture: w.posture, burn: w.burn || 0 });
+      let dmg = w.damage * this.stats.damageMult * this.fx.damageBonus() * rand(0.9, 1.1);
+      // Veiled Grace: the Duchess strikes harder from the shadows or at the unaware.
+      if (this.classDef.id === 'duchess' && (this.hidden || e.asleep)) dmg *= 1.4;
+      const result = e.receiveHit(dmg, dir, this, { posture: w.posture, burn: w.burn || 0, veiled: this.hidden });
       this.game.onEnemyHit(e, result, dir, dmg);
       if (result === 'blocked') {
         this.stamina = Math.max(0, this.stamina - 8);
@@ -419,6 +466,25 @@ export class Player {
         }
         if (t > 0.5) this.setState('idle');
         break;
+      case 'restage':
+        if (t > 0.12 && !this.skillFired) {
+          this.skillFired = true;
+          const n = this.restage.trigger();
+          if (!n) {
+            // Nothing to replay: the curtain rises on an empty stage. Refund most of the wait.
+            this.skillCd *= 0.25;
+            this.game.hud.toast('Restage', 'No wounds to replay', 0xc89ae0);
+          }
+        }
+        if (t > 0.4) this.setState('idle');
+        break;
+      case 'summon':
+        if (t > 0.2 && !this.skillFired) {
+          this.skillFired = true;
+          this.summoner.callNext();
+        }
+        if (t > 0.5) this.setState('idle');
+        break;
     }
   }
 
@@ -476,7 +542,28 @@ export class Player {
     } else if (u.id === 'sunfall') {
       this.sunTarget = this.aimGroundPoint(24);
       this.game.addEffect(new GroundTelegraph(this.game, this.sunTarget.x, this.sunTarget.y, this.sunTarget.z, 6.5, 1.05, { color: 0xffb040 }));
+    } else if (u.id === 'finale') {
+      this.invuln = 0.6;
     }
+  }
+
+  /** The Duchess slips behind the veil: unseen, and her strikes land like ripostes. */
+  vanish(duration) {
+    this.hidden = true;
+    this.hideTimer = duration;
+    this.game.hud.setVeil(true);
+    this.game.audio.play('vanish');
+    this.game.glow.burst(this.pos.clone().setY(this.pos.y + 1), 50, () => ({
+      vel: new THREE.Vector3(rand(-3, 3), rand(0, 3), rand(-3, 3)), life: rand(0.5, 1.2), size: rand(0.05, 0.1), color: 0xc89ae0, drag: 2,
+    }));
+  }
+
+  reveal() {
+    if (!this.hidden) return;
+    this.hidden = false;
+    this.hideTimer = 0;
+    this.game.hud.setVeil(false);
+    this.game.audio.play('reveal');
   }
 
   /** Where the look ray first meets the ground (or a point ahead at foot level). */
@@ -531,6 +618,20 @@ export class Player {
         if (t > 2.5) this.setState('idle');
         break;
       }
+      case 'finale':
+        if (!this.ultFired && t > 0.2) {
+          this.ultFired = true;
+          this.vanish(7);
+        }
+        if (t > 0.45) this.setState('idle');
+        break;
+      case 'march':
+        if (!this.ultFired && t > 0.3) {
+          this.ultFired = true;
+          this.summoner.march();
+        }
+        if (t > 0.7) this.setState('idle');
+        break;
       case 'cuts': {
         const every = 0.13;
         const i = Math.floor(t / every);
@@ -624,11 +725,24 @@ export class Player {
     this.manaDelay = Math.max(0, this.manaDelay - dt);
     this.skillCd = Math.max(0, this.skillCd - dt);
     if (this.manaDelay <= 0 && this.alive) this.mana = Math.min(S.maxMana, this.mana + S.manaRegen * dt);
+    this.arts.update(dt);
+    this.restage.update(dt);
+    this.summoner.update(dt);
+    if (this.streakTimer > 0) {
+      this.streakTimer -= dt;
+      if (this.streakTimer <= 0) { this.streak = 0; this.game.hud.streak(0); }
+    }
+    if (this.hidden) {
+      this.hideTimer -= dt;
+      if (this.hideTimer <= 0 || !this.alive) this.reveal();
+    }
 
     if (this.alive && this.game.menuOpen === false) {
       if (input.wasPressed('KeyQ')) this.trySkill();
       if (input.wasPressed('KeyR')) this.tryUltimate();
       if (input.wasPressed('KeyF')) this.tryFlask();
+      if (input.wasPressed('KeyZ')) this.arts.tryUse(0);
+      if (input.wasPressed('KeyX')) this.arts.tryUse(1);
       if (['idle', 'guard'].includes(this.state)) {
         for (let i = 0; i < WEAPON_SLOTS; i++) if (input.wasPressed(`Digit${i + 1}`)) this.switchTo(i);
         if (input.consume('next')) this.cycleWeapon(1);
@@ -653,6 +767,9 @@ export class Player {
         break;
       case 'ult':
         this.updateUlt(dt);
+        break;
+      case 'art':
+        this.arts.updateCast(dt);
         break;
       case 'drink':
         if (!this.healed && this.stateTime > 0.4) {
@@ -680,10 +797,10 @@ export class Player {
     // Movement.
     const [strafe, fwdAxis] = this.alive ? input.moveAxes() : [0, 0];
     const moving = strafe !== 0 || fwdAxis !== 0;
-    const mult = { idle: 1, guard: 0.5, attack: 0.3, recoil: 0.3, guardbreak: 0.15, hurt: 0.4, dead: 0, skill: 0.4, drink: 0.35, swap: 0.8, ult: this.ultId === 'oath' ? 0.5 : 0 }[this.state];
+    const mult = { idle: 1, guard: 0.5, attack: 0.3, recoil: 0.3, guardbreak: 0.15, hurt: 0.4, dead: 0, skill: 0.4, drink: 0.35, swap: 0.8, ult: this.ultId === 'oath' ? 0.5 : this.ultId === 'finale' || this.ultId === 'march' ? 0.6 : 0, art: this.artId === 'breath' ? 0.45 : 0.3 }[this.state] ?? 1;
     this.sprinting = this.state === 'idle' && fwdAxis > 0 && input.down('ShiftLeft', 'ShiftRight') && this.stamina > 0 && this.grounded;
     const wading = this.grounded && this.pos.y < -0.3 && this.game.mode === 'run';
-    const speed = (this.sprinting ? S.speed * (P.sprintSpeed / P.speed) : S.speed) * mult * (wading ? 0.62 : 1);
+    const speed = (this.sprinting ? S.speed * (P.sprintSpeed / P.speed) : S.speed) * mult * (wading ? 0.62 : 1) * this.streakMult;
     if (this.sprinting) {
       this.stamina = Math.max(0, this.stamina - P.sprintCost * dt);
       this.staminaDelay = 0.3;
@@ -810,7 +927,7 @@ const COMMON_POSES = {
   swap: P3([0.45, -0.95, -0.6], [0.6, 0, 0.3]),
   drink: P3([0.5, -0.7, -0.6], [0.2, 0, 0.4]),
 };
-const MODEL_SCALE = { longsword: 0.6, daggers: 0.8, greatsword: 0.52, spear: 0.55, mace: 0.7, wand: 0.9, staff: 0.55 };
+const MODEL_SCALE = { longsword: 0.6, daggers: 0.8, greatsword: 0.52, spear: 0.55, mace: 0.7, wand: 0.9, staff: 0.55, emberstaff: 0.58, stormstaff: 0.55, rapier: 0.66, scythe: 0.5 };
 
 const OFF_POSES = {
   lantern: { idle: P3([-0.46, -0.4, -0.76], [0, 0.3, 0]), guard: P3([-0.5, -0.5, -0.7], [0, 0.3, 0]) },
@@ -1059,6 +1176,12 @@ class Viewmodel {
     } else if (state === 'drink') {
       offTarget = P3([-0.1, -0.2, -0.35], [0.9, 0, 0.5]);
       offRate = 18;
+    } else if (state === 'art') {
+      // The staff thrust forward, tip towards the target, trembling with the spell.
+      const t = pl.stateTime;
+      mainTarget = P3([0.24, -0.26 + Math.sin(t * 40) * 0.006, -0.72], [-1.35, 0, 0.05]);
+      offTarget = P3([-0.3, -0.3, -0.7], [0, 0.3, 0]);
+      mainRate = 22;
     } else if (state === 'ult') {
       const t = pl.stateTime;
       if (pl.ultId === 'oath') {
