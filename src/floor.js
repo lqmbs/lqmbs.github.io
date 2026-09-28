@@ -9,6 +9,7 @@ import { Chamber, CELL, GATE_PLANE, LEVEL_HEIGHT } from './chamber.js';
 import { COMBAT_LAYOUTS, latOf } from './layouts.js';
 import { createSkyDome } from './sky.js';
 import { Lift, ShortcutGate } from './lifts.js';
+import { findLadders, Ladder } from './ladders.js';
 
 const key = (x, y) => `${x},${y}`;
 const DIR_OF = { '1,0': 'e', '-1,0': 'w', '0,1': 's', '0,-1': 'n' };
@@ -242,9 +243,25 @@ export class DungeonFloor {
     }
     for (const e of this.edges) this.buildPassage(e);
     for (const span of this.spans.values()) if (span.liftSpot) this.buildSpanLift(span);
+    this.placeLadders();
     this.buildSurroundings();
     this.buildGrass();
     for (const room of this.allRooms) room.setVisible(false);
+  }
+
+  /** Ladders out of every pit a fall can leave you in (see ladders.js). */
+  placeLadders() {
+    this.ladders = [];
+    for (const room of this.allRooms) {
+      room.ladders = [];
+      for (const l of findLadders(room)) {
+        const w = (p) => ({ x: p.x + room.ox, y: p.y + room.elev, z: p.z + room.oz });
+        const ladder = new Ladder(this.game, this.root, w(l.base), w(l.top));
+        room.ladders.push(ladder);
+        room.interactables.push(ladder);
+        this.ladders.push(ladder);
+      }
+    }
   }
 
   /** A spot on the span's axis with open floor beneath it, in the chamber below. */

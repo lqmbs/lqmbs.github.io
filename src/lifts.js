@@ -50,6 +50,36 @@ export class Lift {
         frame.add(brace);
       }
     }
+    // Landing gates: an iron fence round the shaft at each end. It sinks into the floor once the
+    // car has arrived there, and rises again as soon as the car leaves.
+    this.fences = {};
+    this.fenceOpen = { high: startHigh ? 1 : 0, low: startHigh ? 0 : 1 };
+    for (const level of ['high', 'low']) {
+      const fence = new THREE.Group();
+      fence.position.y = level === 'high' ? highY : lowY;
+      frame.add(fence);
+      for (const [sx, sz, len, rot] of [[0, 1, w, 0], [0, -1, w, 0], [1, 0, d, Math.PI / 2], [-1, 0, d, Math.PI / 2]]) {
+        const panel = new THREE.Group();
+        panel.position.set(sx * (w / 2 + 0.05), 0, sz * (d / 2 + 0.05));
+        panel.rotation.y = rot;
+        fence.add(panel);
+        for (const y of [0.15, 1.2]) {
+          const rail = new THREE.Mesh(new THREE.BoxGeometry(len, 0.08, 0.08), M.iron);
+          rail.position.y = y;
+          panel.add(rail);
+        }
+        for (let bx = -len / 2 + 0.2; bx <= len / 2 - 0.19; bx += 0.3) {
+          const bar = new THREE.Mesh(new THREE.BoxGeometry(0.05, 1.3, 0.05), M.iron);
+          bar.position.set(bx, 0.65, 0);
+          panel.add(bar);
+          const tip = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.14, 4), M.iron);
+          tip.position.set(bx, 1.37, 0);
+          panel.add(tip);
+        }
+      }
+      this.fences[level] = fence;
+    }
+
     // The headframe: a wheel and a beam across the top.
     const beam = new THREE.Mesh(new THREE.BoxGeometry(w + 0.8, 0.35, 0.35), M.iron);
     beam.position.set(0, top, 0);
@@ -88,7 +118,7 @@ export class Lift {
     s.liftId = this.id;
     // The pit floor at the bottom, so you can wait there for the car.
     world.addRect(this.x, this.z, this.w / 2, this.d / 2, this.lowY, { angle: this.angle, thick: 1.4, parapet: false, tag: 'liftbase' });
-    // Barriers across each landing, closed while the car is away — no stepping into the shaft.
+    // Barriers across each landing, closed unless the car rests there — no stepping into the shaft.
     const x0 = this.x - this.w / 2, x1 = this.x + this.w / 2, z0 = this.z - this.d / 2, z1 = this.z + this.d / 2;
     world.addBox(x0, z0, x1, z1, this.highY - 1, this.highY + 2.5).liftBar = `${this.id}:high`;
     world.addBox(x0, z0, x1, z1, this.lowY + 0.3, this.lowY + 2.5).liftBar = `${this.id}:low`;
@@ -103,6 +133,46 @@ export class Lift {
       for (const b of w.boxes) {
         if (b.liftBar === `${this.id}:high`) this.bars.high.push(b);
         if (b.liftBar === `${this.id}:low`) this.bars.low.push(b);
+      }
+    }
+    this.addGuards(worlds);
+  }
+
+  /**
+   * Walls round the car so a rider can only step off where there is ground to step onto: a side
+   * is walled at a landing unless some floor meets it at that height, and every side is walled
+   * between the landings.
+   */
+  addGuards(worlds) {
+    const hw = this.w / 2, hd = this.d / 2, T = 0.3;
+    const sides = [
+      { n: [1, 0], box: [hw, -hd, hw + T, hd], along: [0, 1], half: hd },
+      { n: [-1, 0], box: [-hw - T, -hd, -hw, hd], along: [0, 1], half: hd },
+      { n: [0, 1], box: [-hw, hd, hw, hd + T], along: [1, 0], half: hw },
+      { n: [0, -1], box: [-hw, -hd - T, hw, -hd], along: [1, 0], half: hw },
+    ];
+    const ground = (side, y) => {
+      for (const t of [-0.6, 0, 0.6]) {
+        const x = this.x + side.n[0] * (side.half === hd ? hw : hd) + side.n[0] * 0.8 + side.along[0] * t * side.half;
+        const z = this.z + side.n[1] * (side.half === hd ? hw : hd) + side.n[1] * 0.8 + side.along[1] * t * side.half;
+        for (const w of worlds) {
+          const g = w.groundAt(x, z, y + 0.5);
+          if (g !== null && Math.abs(g - y) < 0.5) return true;
+        }
+      }
+      return false;
+    };
+    const walls = [];
+    for (const side of sides) {
+      for (const y of [this.lowY, this.highY]) {
+        if (!ground(side, y)) walls.push([side.box, y - 0.4, y + 2.5]);
+      }
+      // Between the landings (clear of a rider standing at either end).
+      if (this.highY - this.lowY > 4.8) walls.push([side.box, this.lowY + 2.1, this.highY - 2.1]);
+    }
+    for (const w of worlds) {
+      for (const [[x0, z0, x1, z1], y0, y1] of walls) {
+        w.addBox(this.x + x0 - w.ox, this.z + z0 - w.oz, this.x + x1 - w.ox, this.z + z1 - w.oz, y0 - w.oy, y1 - w.oy).liftGuard = this.id;
       }
     }
   }
@@ -143,7 +213,8 @@ export class Lift {
       this.y = this.from + (this.target - this.from) * easeInOut(this.t);
       if (this.t >= 1) {
         this.moving = false;
-        this.wait = -0.8;
+        // Linger at the landing long enough for the gate to open and the rider to step off.
+        this.wait = -1.8;
         this.game.audio.play('lift-stop');
       }
     }
@@ -151,9 +222,23 @@ export class Lift {
       s.y = s.top = this.y - w.oy;
       s.bottom = s.y - 0.5;
     }
+    // Landing gates. A landing opens once the car has come to rest there, and closes the moment
+    // it leaves. The rider is never fenced in: while you stand on the car, neither gate blocks you
+    // (otherwise the arriving landing's gate would shove you off the deck on the way in).
+    const riding = this.onDeck(p) && Math.abs(p.pos.y - this.y) < 0.6;
+    const atHigh = !this.moving && Math.abs(this.y - this.highY) < 0.05;
+    const atLow = !this.moving && Math.abs(this.y - this.lowY) < 0.05;
     if (this.bars) {
-      for (const b of this.bars.high) b.enabled = Math.abs(this.y - this.highY) > 3;
-      for (const b of this.bars.low) b.enabled = Math.abs(this.y - this.lowY) > 3;
+      for (const b of this.bars.high) b.enabled = !atHigh && !riding;
+      for (const b of this.bars.low) b.enabled = !atLow && !riding;
+    }
+    for (const [level, open] of [['high', atHigh], ['low', atLow]]) {
+      const was = this.fenceOpen[level];
+      this.fenceOpen[level] = Math.max(0, Math.min(1, was + (open ? dt * 2.5 : -dt * 4)));
+      if (was < 0.5 && this.fenceOpen[level] >= 0.5 && Math.hypot(p.pos.x - this.x, p.pos.z - this.z) < 20) this.game.audio.play('gate');
+      const f = this.fences[level];
+      f.position.y = (level === 'high' ? this.highY : this.lowY) - easeInOut(this.fenceOpen[level]) * 1.45;
+      f.visible = this.fenceOpen[level] < 0.999;
     }
     this.car.position.y = this.y;
     this.wheel.rotation.z = this.y * 0.8;

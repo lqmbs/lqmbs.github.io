@@ -1100,6 +1100,13 @@ class Game {
       this.hud.setPrompt(null);
       return;
     }
+    // Walking into the foot of a ladder starts the climb.
+    if (p.state === 'idle' && input.down('KeyW', 'ArrowUp')) {
+      for (const it of this.nearbyInteractables()) {
+        if (it.touching?.(p) && Math.abs(angleDiff(p.yaw, yawOf(it.dir.x, it.dir.z))) < 1.1) { p.climb(it); return; }
+      }
+    }
+    if (p.state === 'climb') { this.hud.setPrompt(null); return; }
     this.focus = this.findFocus();
     this.hud.setPrompt(this.focus);
     if (input.wasPressed('KeyE') && this.focus && ['idle', 'guard', 'swap'].includes(p.state)) this.focus.interact();

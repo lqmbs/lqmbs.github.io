@@ -59,6 +59,7 @@ class FogWall {
     chamber.group.add(this.mesh);
     const lat = latOf(dir);
     this.blocker = chamber.world.addBox(x - lat.x * 2 - d.x * 0.4, z - lat.z * 2 - d.z * 0.4, x + lat.x * 2 + d.x * 0.4, z + lat.z * 2 + d.z * 0.4, y - 1, y + 6);
+    this.blocker.dynamic = true;
     this.blocker.enabled = false;
   }
 
@@ -113,6 +114,7 @@ class LockedGate {
     this.bars.add(shackle);
     chamber.group.add(this.bars);
     this.blocker = chamber.world.addBox(x - lat.x * 2 - d.x * 0.4, z - lat.z * 2 - d.z * 0.4, x + lat.x * 2 + d.x * 0.4, z + lat.z * 2 + d.z * 0.4, y - 1, y + 6);
+    this.blocker.dynamic = true;
     const [ix, iz] = along(dir, GATE_PLANE + 1.4);
     this.position = new THREE.Vector3(ix + chamber.ox, y + chamber.elev, iz + chamber.oz);
     this.radius = 2.8;

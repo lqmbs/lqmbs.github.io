@@ -202,9 +202,10 @@ An expedition is three floors, each drawn from a different biome:
 **Floors loop, climb and stack.** They are built like an interconnected castle rather than a corridor:
 
 - **Loops.** The paths between chambers close into rings, so there is usually another way round and rarely a long walk back. Only the guardian, the treasury and (usually) the merchant sit at dead ends.
-- **Tiers.** Chambers stand on different levels, 6 m apart. Passages climb between neighbouring tiers by stairs. Where the drop is too great, a high walk leads to a **lift**: an iron cage in a shaft that carries you when you step on and comes to you when you wait at an empty landing. Barriers close a landing while the car is away, so you can't step into an empty shaft. The guardian always waits a tier above the chamber that leads to it.
+- **Tiers.** Chambers stand on different levels, 6 m apart. Passages climb between neighbouring tiers by stairs. Where the drop is too great, a high walk leads to a **lift**: an iron cage in a shaft that carries you when you step on and comes to you when you wait at an empty landing. An iron fence rises at a landing while the car is away, so you can't step into an empty shaft. It sinks into the floor as soon as the car docks and the car lingers long enough for you to step off. The car is walled on every side that has no floor to step onto, so you can't walk off into the shaft mid-ride or at the top. The guardian always waits a tier above the chamber that leads to it.
 - **Spans.** Some cells are stacked: a high **bridge-hall** crosses the cell far above the chamber below, with a fighting platform in its middle, and connects the chambers on either side. A lift set into the bridge drops straight down into the chamber beneath. Fall off a span and you land in the chamber below rather than the abyss.
 - **Shortcuts.** Some loop passages are barred by a portcullis with a lever on one side only, the side farther from the start. From the near side it "opens from the other side"; pull the lever on your way back and the loop is open for good.
+- **Ladders.** When a floor is built, each chamber's ground is sampled on a 1 m grid and traced back from its gates. Anywhere you could fall into but not walk out of gets a timber ladder where the pit meets higher ground at its gentlest point, such as a flooded trench below a tier platform or the floor under a span. Big pits get several. Walk into a ladder (or press E) to climb it.
 - **The citadel.** Beyond the guardian's arena rises the floor's citadel, a colossal keep on a crag crowned with spires and lit windows, with lava or water falling from it in those biomes. You can see it from anywhere on the floor, so you always know which way the guardian lies.
 
 **Encounters wake as you arrive.** Some foes wait in plain sight, slumped and still, and others claw out of the floor when you step into their chamber. A strike on a sleeping foe is a sneak attack and lands like a riposte. If you leave a chamber and get far away, its foes walk home and wait for you. Clearing a chamber raises a reward: a relic, a chest, or a scatter of coin.
@@ -245,7 +246,8 @@ src/util.js       Math helpers, gothic arch geometry, GeoBatch (static-geometry 
 src/physics.js    World: walkable surfaces (rect/ramp/disc/ring/terrain), obstacles, slide-and-fall movement, per-chamber offsets (including tier height)
 src/architecture.js  Builder: platforms, bridges, stairs, pillars, arcades, crystals, towers, parapets, vista
 src/floor.js      Seamless floor: looping, tiered, stacked generation; stair and lift passages; shortcuts; the citadel; vista, abyss, visibility
-src/lifts.js      Lifts (shared moving surfaces with landing barriers) and one-sided shortcut gates
+src/lifts.js      Lifts (shared moving surfaces with landing fences) and one-sided shortcut gates
+src/ladders.js    Reachability analysis that finds inescapable pits, and the climbable ladders placed in them
 src/chamber.js    A chamber of a floor: gateways, fog walls, decoration, dormant encounters
 src/layouts.js    Chamber archetypes (gothic, imperial and titan-hewn) plus shrine, reliquary, bazaar and arena
 src/sky.js        Painterly sky dome

@@ -499,6 +499,45 @@ export class Player {
     this.game.audio.play('drink');
   }
 
+  // ---- Ladders ---------------------------------------------------------------
+
+  climb(ladder) {
+    if (!this.alive || this.state === 'climb') return;
+    this.ladder = ladder;
+    this.climbFrom = this.pos.clone();
+    this.climbDur = (ladder.top.y - ladder.base.y) / 3 + 0.2;
+    this.vel.set(0, 0, 0);
+    this.knock.set(0, 0, 0);
+    this.setState('climb');
+    this.game.hud.setPrompt(null);
+  }
+
+  /** Step to the foot, climb hand over hand, then step off onto the ledge. */
+  updateClimb(dt) {
+    const L = this.ladder, t = this.stateTime;
+    const foot = L.base.clone().addScaledVector(L.dir, 0.05);
+    const yaw = Math.atan2(-L.dir.x, -L.dir.z);
+    this.yaw += angleDiff(this.yaw, yaw) * Math.min(1, dt * 8);
+    if (t < 0.2) {
+      this.pos.lerpVectors(this.climbFrom, foot, t / 0.2);
+    } else if (t < 0.2 + this.climbDur) {
+      const k = (t - 0.2) / this.climbDur;
+      this.pos.set(foot.x, L.base.y + (L.top.y - L.base.y) * k, foot.z);
+      this.bobPhase += dt * 9;
+      this.stepDist += dt * 3;
+      if (this.stepDist > 0.9) { this.stepDist = 0; this.game.audio.play('step'); }
+    } else if (t < 0.5 + this.climbDur) {
+      const k = (t - 0.2 - this.climbDur) / 0.3;
+      this.pos.set(foot.x + (L.top.x - foot.x) * k, L.top.y, foot.z + (L.top.z - foot.z) * k);
+    } else {
+      this.pos.copy(L.top);
+      this.lastSafe = { x: L.top.x, y: L.top.y, z: L.top.z };
+      this.grounded = true;
+      this.vel.set(0, 0, 0);
+      this.setState('idle');
+    }
+  }
+
   // ---- Ultimate ------------------------------------------------------------
 
   get ultMax() { return this.classDef.ultimate.charge; }
@@ -792,6 +831,13 @@ export class Player {
         if (this.stateTime > 0.12 && input.rmb) this.enterGuard();
         else if (this.stateTime > 0.28) this.setState('idle');
         break;
+    }
+
+    // On a ladder, the climb carries you; no walking, no gravity.
+    if (this.state === 'climb') {
+      this.updateClimb(dt);
+      this.updateCamera(dt, 0);
+      return;
     }
 
     // Movement.
@@ -1176,6 +1222,12 @@ class Viewmodel {
     } else if (state === 'drink') {
       offTarget = P3([-0.1, -0.2, -0.35], [0.9, 0, 0.5]);
       offRate = 18;
+    } else if (state === 'climb') {
+      // Hand over hand: the weapon and the off-hand reach up in turn, rung by rung.
+      const s = Math.sin(pl.bobPhase * 1.2);
+      mainTarget = P3([0.34, -0.35 + Math.max(0, s) * 0.3, -0.55], [0.3, 0, 0.2]);
+      offTarget = P3([-0.34, -0.35 + Math.max(0, -s) * 0.3, -0.55], [0.3, 0, -0.2]);
+      mainRate = offRate = 12;
     } else if (state === 'art') {
       // The staff thrust forward, tip towards the target, trembling with the spell.
       const t = pl.stateTime;
