@@ -13,13 +13,14 @@ export class Input {
     this.lookY = 0;
     this.lmb = false;
     this.rmb = false;
-    this.buffered = { attack: -Infinity, guard: -Infinity, jump: -Infinity };
+    this.buffered = { attack: -Infinity, guard: -Infinity, jump: -Infinity, next: -Infinity, prev: -Infinity };
 
     window.addEventListener('keydown', (e) => {
       if (e.code === 'Space') {
         e.preventDefault();
         if (!e.repeat) this.buffer('jump');
       }
+      if (e.code === 'Tab') e.preventDefault();
       if (!e.repeat) this.pressed.add(e.code);
       this.keys.add(e.code);
     });
@@ -43,6 +44,9 @@ export class Input {
       if (e.button === 2) this.rmb = false;
     });
     window.addEventListener('contextmenu', (e) => e.preventDefault());
+    window.addEventListener('wheel', (e) => {
+      if (this.locked && Math.abs(e.deltaY) > 1) this.buffer(e.deltaY > 0 ? 'next' : 'prev');
+    }, { passive: true });
   }
 
   get locked() { return document.pointerLockElement === this.canvas; }

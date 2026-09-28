@@ -4,7 +4,9 @@ import { World } from './physics.js';
 import { Builder, samplePoint } from './architecture.js';
 import { rand, randInt, pick, chance, shuffle, flicker, composeMatrix, archWallGeometry, worldBoxGeometry, TAU } from './util.js';
 import { Pedestal, Descent, rollItem } from './items.js';
-import { Skeleton, Warden, pickEnemyType } from './enemies.js';
+import { WeaponDrop } from './loot.js';
+import { rollWeapon } from './weapons.js';
+import { Skeleton, Warden, pickEnemyType, separateEnemies } from './enemies.js';
 
 const R = CONFIG.gateDistance;
 
@@ -404,6 +406,8 @@ export class Chamber {
     this.descent = null;
     this.stateTime = 0;
     this.center = { x: 0, y: 0, z: 0 };
+    this.loot = [];
+    this.interactables = [];
   }
 
   build() {
@@ -433,7 +437,10 @@ export class Chamber {
     this.emitters = b.emitters;
     this.buildFlames(b.flames);
 
-    if (this.type === 'treasure') this.pedestal = new Pedestal(this, rollItem(game.player), this.center.x, this.center.y, this.center.z, true);
+    if (this.type === 'treasure') {
+      this.pedestal = new Pedestal(this, rollItem(game.player), this.center.x, this.center.y, this.center.z, true);
+      new WeaponDrop(game, this, rollWeapon(game.depth, 1), new THREE.Vector3(this.center.x + 2.2, this.center.y, this.center.z + 1.2));
+    }
   }
 
   /** Farthest walkable point along a gate's axis (within reach of the landing). */
@@ -704,12 +711,13 @@ export class Chamber {
     }
 
     for (const e of this.enemies) e.update(dt);
-    this.separateEnemies();
+    separateEnemies(this.enemies);
     this.enemies = this.enemies.filter((e) => !e.removed);
     if (this.state === RoomState.COMBAT && this.enemies.length === 0) this.onCleared();
 
     this.pedestal?.update(dt);
     this.descent?.update(dt);
+    for (const l of this.loot) l.update(dt);
 
     const t = this.game.time;
     this.updateFlames(t);
@@ -725,25 +733,6 @@ export class Chamber {
           pos: new THREE.Vector3(em.pos.x + rand(-em.spread, em.spread), em.pos.y + rand(0.5, 6), em.pos.z + rand(-em.spread, em.spread)),
           vel: new THREE.Vector3(rand(-0.1, 0.1), rand(-0.2, 0.05), rand(-0.1, 0.1)), life: rand(2, 4), size: 0.03, color: 0xbfb49a,
         });
-      }
-    }
-  }
-
-  separateEnemies() {
-    const list = this.enemies;
-    for (let i = 0; i < list.length; i++) {
-      const a = list[i];
-      if (!a.active) continue;
-      for (let j = i + 1; j < list.length; j++) {
-        const b = list[j];
-        if (!b.active || Math.abs(a.pos.y - b.pos.y) > 1.5) continue;
-        const dx = b.pos.x - a.pos.x, dz = b.pos.z - a.pos.z;
-        const d = Math.hypot(dx, dz), min = a.radius + b.radius;
-        if (d >= min || d < 1e-4) continue;
-        const push = (min - d) / d;
-        const wa = b.mass / (a.mass + b.mass), wb = 1 - wa;
-        a.pos.x -= dx * push * wa; a.pos.z -= dz * push * wa;
-        b.pos.x += dx * push * wb; b.pos.z += dz * push * wb;
       }
     }
   }

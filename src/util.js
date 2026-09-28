@@ -75,25 +75,35 @@ export function scaleUV(geo, su, sv = su) {
 }
 
 /**
- * A slab of wall (width x height, centred on x, bottom at y=0) with pointed (gothic) arch openings
- * notched up from its bottom edge. Extruded along Z and centred on it. UVs are world units / 4.
- * Each arch: { cx, halfW, spring, peak }.
+ * A slab of wall (width x height, centred on x, bottom at y=0) pierced by pointed (gothic)
+ * arches. Arches with no `bottom` are doorways notched up from the base; arches with a
+ * `bottom` > 0 are windows cut as holes. Extruded along Z and centred on it; UVs are world / 4.
+ * Each arch: { cx, halfW, spring, peak, bottom? }.
  */
 export function archWallGeometry(width, height, depth, arches) {
+  const archPath = (path, a, fromBottom) => {
+    const rise = a.peak - a.spring;
+    path.lineTo(a.cx - a.halfW, fromBottom);
+    path.lineTo(a.cx - a.halfW, a.spring);
+    path.bezierCurveTo(a.cx - a.halfW, a.spring + rise * 0.55, a.cx - a.halfW * 0.35, a.peak - rise * 0.08, a.cx, a.peak);
+    path.bezierCurveTo(a.cx + a.halfW * 0.35, a.peak - rise * 0.08, a.cx + a.halfW, a.spring + rise * 0.55, a.cx + a.halfW, a.spring);
+    path.lineTo(a.cx + a.halfW, fromBottom);
+  };
+  const doors = arches.filter((a) => !a.bottom).sort((p, q) => p.cx - q.cx);
+  const windows = arches.filter((a) => a.bottom > 0);
   const shape = new THREE.Shape();
   shape.moveTo(-width / 2, 0);
-  for (const a of [...arches].sort((p, q) => p.cx - q.cx)) {
-    const rise = a.peak - a.spring;
-    shape.lineTo(a.cx - a.halfW, 0);
-    shape.lineTo(a.cx - a.halfW, a.spring);
-    shape.bezierCurveTo(a.cx - a.halfW, a.spring + rise * 0.55, a.cx - a.halfW * 0.35, a.peak - rise * 0.08, a.cx, a.peak);
-    shape.bezierCurveTo(a.cx + a.halfW * 0.35, a.peak - rise * 0.08, a.cx + a.halfW, a.spring + rise * 0.55, a.cx + a.halfW, a.spring);
-    shape.lineTo(a.cx + a.halfW, 0);
-  }
+  for (const a of doors) archPath(shape, a, 0);
   shape.lineTo(width / 2, 0);
   shape.lineTo(width / 2, height);
   shape.lineTo(-width / 2, height);
   shape.lineTo(-width / 2, 0);
+  for (const a of windows) {
+    const hole = new THREE.Path();
+    hole.moveTo(a.cx + a.halfW, a.bottom);
+    archPath(hole, a, a.bottom);
+    shape.holes.push(hole);
+  }
   const geo = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: false, curveSegments: 6 });
   geo.translate(0, 0, -depth / 2);
   return scaleUV(geo, 0.25);

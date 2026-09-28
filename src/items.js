@@ -7,7 +7,7 @@ export const ITEMS = [
   { id: 'ember', name: 'Vampiric Ember', desc: 'Strikes drain life', lore: 'A coal that still remembers blood.', color: 0xff3322, shape: 'orb',
     apply: (s) => { s.lifesteal += 3; } },
   { id: 'greatshard', name: 'Ashen Greatblade Shard', desc: 'Damage up', lore: 'Broken from the sword of a king no one mourned.', color: 0xd9d2c0, shape: 'shard',
-    apply: (s) => { s.damage += 6; } },
+    apply: (s) => { s.damageMult *= 1.2; } },
   { id: 'fork', name: 'Tuning Fork of the Deep', desc: 'Wider parry window', lore: 'Struck once, it hums for a thousand years.', color: 0x6ad8ff, shape: 'fork',
     apply: (s) => { s.parryWindow += 0.05; } },
   { id: 'aegis', name: "Warden's Aegis", desc: 'Blocking costs less', lore: 'Its bearer never fell. Its bearer never left.', color: 0xc0c8d8, shape: 'shield',
@@ -27,7 +27,7 @@ export const ITEMS = [
   { id: 'shroud', name: 'Moth-Eaten Shroud', desc: 'Move speed up', lore: 'Lighter than the body it once wrapped.', color: 0xb0a890, shape: 'cloak',
     apply: (s) => { s.speed *= 1.1; } },
   { id: 'tithe', name: "Sinner's Tithe", desc: 'Damage way up, max health down', lore: 'Paid in flesh, collected in blood.', color: 0x8a1030, shape: 'shard',
-    apply: (s, p) => { s.damage *= 1.45; s.maxHp = Math.max(30, s.maxHp - 20); p.hp = Math.min(p.hp, s.maxHp); } },
+    apply: (s, p) => { s.damageMult *= 1.45; s.maxHp = Math.max(30, s.maxHp - 20); p.hp = Math.min(p.hp, s.maxHp); } },
   { id: 'tear', name: 'Crimson Tear', desc: 'Restores 50 health', lore: 'Wept by a saint who bled instead.', color: 0xff2040, shape: 'orb', consumable: true,
     apply: (s, p) => { p.hp = Math.min(s.maxHp, p.hp + 50); } },
 ];

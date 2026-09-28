@@ -23,11 +23,48 @@ GitHub Pages also works if you point it at the repository root. Clicking **Desce
 | Mouse | Look |
 | `Shift` | Sprint (drains stamina) |
 | `Space` | Jump |
-| Left click | Slash (animation-locked; consecutive clicks chain alternating cuts) |
+| Left click | Attack, or cast with a wand or staff (animation-locked; clicks chain) |
 | Right click (hold) | Guard |
+| `Q` | Class skill |
+| `F` | Drink a Crimson Flask (heals 40%, refilled each floor) |
+| `E` | Interact: take a weapon, rest at the table, ring the effigy, begin an expedition |
+| `1 2 3` / mouse wheel | Switch weapon slots |
+| `G` | Drop the weapon in hand |
+| `Tab` | Inventory |
 | `Esc` | Pause and show stats |
 | `M` | Mute |
-| `R` | Rise again after death |
+
+## The Roundtable Hold
+
+Every run starts in the hub: a ruined cruciform hold on a misty island, under an overcast sky.
+
+- **The Round Table** is the octagonal chamber at the crossing, where a column of grace rises through a stone table pierced with swords. Rest there to change class.
+- **The chapel nave** runs north, with a red carpet, arcaded columns and candles. At its end is the fog-filled **Expedition Gate**.
+- **The library** runs west: shelves of books, a reading desk and a globe.
+- **The armory corridor** runs east to the **sparring grounds**, a ring with a tent, a campfire, three training dummies, a weapon rack holding every weapon type, and a **Summoning Effigy** that calls any enemy (or the guardian) into the ring.
+- **The roofless courtyard** runs south, overgrown and ruined, out to a meadow, a grey beach, and a sea dotted with stacks and a drowned keep.
+
+Dying in the sparring ground just sends you back to the table. On an expedition, death ends the run and returns you to the Hold.
+
+## Classes
+
+| Class | Kit | Passive | Skill (Q) |
+| --- | --- | --- | --- |
+| Vigil Knight | Longsword & kite shield | Wider parry window; the shield blocks almost everything | **Shield Bash**: lunges and staggers, and can hurl foes off ledges |
+| Duelist | Twin daggers | Ripostes +40%; fastest on foot | **Sidestep**: a short dash in any direction with invincibility frames |
+| Lantern Mage | Ember Wand & lantern | Mana well for spells; brighter lantern | **Lantern Flare**: blinds, staggers and ignites everything nearby |
+
+## Weapons & inventory
+
+Nightreign-style: three weapon slots, flasks and relics. Everything is lost when the run ends; each expedition starts from your class's kit.
+
+- **Types:** Longsword, Twin Daggers, Greatsword, Winged Spear (thrusts), Morning Star, Ember Wand (burning bolts), Sapphire Staff (piercing lances).
+- **Rarities:** Common, Fine, Rare and Legendary, each with a damage multiplier and a colored light beam where the weapon lies.
+- **Affixes:** Keen, Crushing, of Leeching, of Embers, Tuned, Long.
+- Enemies drop weapons: guardians always drop one, heavy knights often do, and others sometimes. The reliquary room holds one too. Walk up and press `E` to take it; if your slots are full, the weapon in your hand is left in its place.
+- Floating damage numbers show every hit.
+
+An expedition is three floors. Clearing the third guardian brings you home.
 
 ## Combat
 
@@ -82,9 +119,14 @@ src/util.js       Math helpers, gothic arch geometry, GeoBatch (static-geometry 
 src/physics.js    World: walkable surfaces (rect/ramp/disc/ring), obstacles, slide-and-fall movement
 src/architecture.js  Builder: platforms, bridges, stairs, pillars, arcades, crystals, towers, parapets, vista
 src/chamber.js    Chamber state machine, gates, layout archetypes, decoration, DungeonFloor generation
-src/player.js     First-person controller, guard/parry/block, attacks, viewmodel (sword, lantern, slash trail)
-src/enemies.js    Enemy base (posture, blocking, telegraphs), Hollow, Shade, Acolyte, Geode Knight, Warden, Bolt
+src/player.js     First-person controller, loadout, guard/parry/block, attacks, spells, skills, flasks, viewmodel
+src/enemies.js    Enemy base (posture, blocking, telegraphs, stun, burn), Hollow, Shade, Acolyte, Geode Knight, Warden, Training Dummy, Bolt
 src/items.js      Relics, pedestals, the descent well
+src/hub.js        The Roundtable Hold: island terrain, the hold, sparring grounds, sea and sky
+src/classes.js    Class definitions
+src/weapons.js    Weapon types, rarities, affixes, weapon/shield models
+src/loot.js       Weapons lying in the world
+src/menus.js      Class selection and summoning menus
 src/hud.js        Bars, boss posture, perilous warning, crosshair, relic list, minimap
 src/audio.js      Synthesised sound
 src/input.js      Pointer lock, buffered actions

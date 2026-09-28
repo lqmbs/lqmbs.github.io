@@ -1,4 +1,6 @@
-import { rand } from './util.js';
+import { rand, randInt } from './util.js';
+
+const randInt3 = () => randInt(1, 3);
 
 /** Every sound is synthesised with WebAudio — no audio assets. */
 export class AudioEngine {
@@ -6,6 +8,13 @@ export class AudioEngine {
     this.ctx = null;
     this.muted = false;
     this.nextAmbient = 4;
+    this.mode = 'depths';
+  }
+
+  /** 'hub' (wind, surf, gulls, a whisper of drone) or 'depths' (the full cavern drone). */
+  setMode(mode) {
+    this.mode = mode;
+    if (this.droneGain) this.droneGain.gain.setTargetAtTime(mode === 'hub' ? 0.012 : 0.065, this.ctx.currentTime, 1.5);
   }
 
   init() {
@@ -53,8 +62,8 @@ export class AudioEngine {
     filter.type = 'lowpass';
     filter.frequency.value = 160;
     filter.Q.value = 3;
-    const gain = ctx.createGain();
-    gain.gain.value = 0.065;
+    const gain = (this.droneGain = ctx.createGain());
+    gain.gain.value = this.mode === 'hub' ? 0.012 : 0.065;
     filter.connect(gain);
     gain.connect(this.master);
     gain.connect(this.reverb);
@@ -222,6 +231,55 @@ export class AudioEngine {
       case 'chime':
         this.tone({ dur: 3, f: rand(1600, 2600), gain: 0.02, attack: 0.02, dest: this.reverb });
         break;
+      case 'swap':
+        this.noise({ dur: 0.12, f: 1800, f2: 900, q: 2, gain: 0.12 });
+        this.metal(1400, 0.2, 0.03);
+        break;
+      case 'dodge':
+        this.noise({ dur: 0.22, f: 900, f2: 250, q: 0.8, gain: 0.3, attack: 0.03 });
+        break;
+      case 'bash':
+        this.tone({ dur: 0.25, f: 110, f2: 50, gain: 0.8 });
+        this.noise({ dur: 0.15, type: 'lowpass', f: 900, gain: 0.6 });
+        break;
+      case 'shield-block':
+        this.tone({ dur: 0.2, f: 180, f2: 90, gain: 0.5 });
+        this.noise({ dur: 0.12, type: 'lowpass', f: 700, gain: 0.5 });
+        break;
+      case 'swing-heavy':
+        this.noise({ dur: 0.3, f: 1200, f2: 250, q: 1.2, gain: 0.45 });
+        break;
+      case 'drink':
+        for (let i = 0; i < 3; i++) this.tone({ t: i * 0.12, dur: 0.08, f: rand(300, 420), f2: rand(200, 260), gain: 0.12 });
+        break;
+      case 'heal':
+        [523.3, 659.3, 784].forEach((f, i) => this.tone({ t: i * 0.05, dur: 1.2, type: 'sine', f, gain: 0.07 }));
+        break;
+      case 'flare':
+        this.noise({ dur: 0.6, type: 'lowpass', f: 3000, f2: 300, gain: 0.7 });
+        this.tone({ dur: 0.8, type: 'sawtooth', f: 90, f2: 40, gain: 0.25 });
+        this.metal(900, 1, 0.06, 0.05);
+        break;
+      case 'cast-player':
+        this.tone({ dur: 0.18, type: 'triangle', f: 700, f2: 1400, gain: 0.1 });
+        this.noise({ dur: 0.15, f: 2500, f2: 900, q: 2, gain: 0.15 });
+        break;
+      case 'pickup-weapon':
+        this.metal(900, 0.5, 0.06);
+        this.noise({ dur: 0.1, f: 2000, q: 1.5, gain: 0.12 });
+        break;
+      case 'bell':
+        this.metal(310, 3, 0.25);
+        break;
+      case 'wave':
+        this.noise({ dur: 3.2, type: 'lowpass', f: 700, f2: 200, gain: 0.18, attack: 1.4 });
+        break;
+      case 'wind':
+        this.noise({ dur: 4, f: 500, f2: 900, q: 3, gain: 0.06, attack: 2 });
+        break;
+      case 'gull':
+        for (let i = 0; i < randInt3(); i++) this.tone({ t: i * 0.35, dur: 0.25, type: 'triangle', f: rand(1100, 1300), f2: rand(700, 850), gain: 0.025, attack: 0.03, dest: this.reverb });
+        break;
       case 'distant':
         this.noise({ dur: 2.2, type: 'lowpass', f: 180, gain: 0.25, attack: 0.6, dest: this.reverb });
         break;
@@ -234,8 +292,13 @@ export class AudioEngine {
     this.nextAmbient -= dt;
     if (this.nextAmbient <= 0) {
       const r = Math.random();
-      this.play(r < 0.5 ? 'drip' : r < 0.8 ? 'chime' : 'distant');
-      this.nextAmbient = rand(2.5, 9);
+      if (this.mode === 'hub') {
+        this.play(r < 0.55 ? 'wave' : r < 0.85 ? 'wind' : 'gull');
+        this.nextAmbient = rand(1.5, 4.5);
+      } else {
+        this.play(r < 0.5 ? 'drip' : r < 0.8 ? 'chime' : 'distant');
+        this.nextAmbient = rand(2.5, 9);
+      }
     }
   }
 

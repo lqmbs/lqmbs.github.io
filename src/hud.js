@@ -1,5 +1,9 @@
 import { ITEMS } from './items.js';
+import * as THREE from 'three';
 import { clamp, damp, toRoman } from './util.js';
+import { hex } from './weapons.js';
+
+const _p = new THREE.Vector3();
 
 export class HUD {
   constructor() {
@@ -33,13 +37,143 @@ export class HUD {
     this.bannerTimer = 0;
     this.itemTimer = 0;
     this.perilousTimer = 0;
+    this.mpBar = $('#mp-bar');
+    this.mpFill = $('#mp-bar .fill');
+    this.skillSlot = $('#skill-slot');
+    this.skillCd = $('#skill-slot .cd');
+    this.skillName = $('#skill-slot .slot-name');
+    this.flaskSlot = $('#flask-slot');
+    this.flaskCount = $('#flask-slot .count');
+    this.weaponsEl = $('#weapons');
+    this.promptEl = $('#prompt');
+    this.toastEl = $('#toast');
+    this.dmgLayer = $('#dmg-layer');
+    this.inventoryEl = $('#inventory');
+    this.numbers = [];
+    this.toastTimer = 0;
+    this.loadoutKey = '';
+  }
+
+  setMinimapVisible(v) { this.minimap.classList.toggle('hidden', !v); }
+  flashMana() { this.pulse(this.mpBar, 'drained'); }
+  flashSkill() { this.pulse(this.skillSlot, 'denied'); }
+
+  /** Weapon slots, skill and mana bar — rebuilt when the loadout changes. */
+  renderLoadout(player) {
+    this.loadoutKey = this.keyOf(player);
+    this.weaponsEl.replaceChildren();
+    player.weapons.forEach((w, i) => {
+      const slot = document.createElement('div');
+      slot.className = `wslot${i === player.activeSlot ? ' active' : ''}${w ? '' : ' empty'}`;
+      const key = document.createElement('span');
+      key.className = 'wkey';
+      key.textContent = i + 1;
+      const name = document.createElement('span');
+      name.className = 'wname';
+      name.textContent = w ? w.displayName : '—';
+      if (w) name.style.color = hex(w.rarity.color);
+      slot.append(key, name);
+      this.weaponsEl.appendChild(slot);
+    });
+    this.skillName.textContent = player.classDef.skill.name;
+    this.mpBar.classList.toggle('hidden', !player.stats.maxMana);
+    if (!this.inventoryEl.classList.contains('hidden')) this.renderInventory(player);
+  }
+
+  keyOf(p) { return `${p.classDef.id}|${p.activeSlot}|${p.weapons.map((w) => w?.uid ?? 0).join(',')}|${p.itemCounts.size}`; }
+  renderLoadoutIfChanged(p) { if (this.keyOf(p) !== this.loadoutKey) this.renderLoadout(p); }
+
+  setPrompt(it) {
+    if (!it) {
+      this.promptEl.classList.add('hidden');
+      this.promptTarget = null;
+      return;
+    }
+    if (this.promptTarget !== it || this.promptText !== it.prompt) {
+      this.promptTarget = it;
+      this.promptText = it.prompt;
+      this.promptEl.querySelector('.ptext').textContent = it.prompt;
+      this.promptEl.querySelector('.ptext').style.color = it.promptColor || '';
+      this.promptEl.querySelector('.psub').textContent = it.sub || '';
+    }
+    this.promptEl.classList.remove('hidden');
+  }
+
+  toast(title, sub, color) {
+    this.toastEl.querySelector('.ttitle').textContent = title;
+    this.toastEl.querySelector('.ttitle').style.color = hex(color);
+    this.toastEl.querySelector('.tsub').textContent = sub;
+    this.pulse(this.toastEl, 'show');
+    this.toastTimer = 2.4;
+  }
+
+  damageNumber(pos, amount, kind) {
+    const div = document.createElement('div');
+    div.className = `dmg ${kind}`;
+    div.textContent = kind === 'blocked' ? 'Blocked' : Math.round(amount);
+    this.dmgLayer.appendChild(div);
+    this.numbers.push({ div, pos: pos.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.4, 0, (Math.random() - 0.5) * 0.4)), t: 0 });
+    if (this.numbers.length > 24) this.numbers.shift().div.remove();
+  }
+
+  toggleInventory(player) {
+    const open = this.inventoryEl.classList.toggle('hidden');
+    if (!open) this.renderInventory(player);
+  }
+
+  renderInventory(player) {
+    const S = player.stats;
+    const inv = this.inventoryEl;
+    inv.replaceChildren();
+    const h = document.createElement('h2');
+    h.textContent = player.classDef.name;
+    inv.appendChild(h);
+    const grid = document.createElement('div');
+    grid.className = 'inv-grid';
+    player.weapons.forEach((w, i) => {
+      const card = document.createElement('div');
+      card.className = `inv-weapon${i === player.activeSlot ? ' active' : ''}`;
+      if (!w) {
+        card.classList.add('empty');
+        card.textContent = `${i + 1} · empty`;
+      } else {
+        const title = document.createElement('div');
+        title.className = 'inv-name';
+        title.textContent = `${i + 1} · ${w.displayName}`;
+        title.style.color = hex(w.rarity.color);
+        const stats = document.createElement('div');
+        stats.className = 'inv-stats';
+        const rows = [['Damage', Math.round(w.damage)], ['Speed', `${Math.round(w.speed * 100)}%`], ['Reach', `${w.reach.toFixed(1)} m`], ['Posture', Math.round(w.posture)], ['Stamina', w.cost]];
+        if (w.manaCost) rows.push(['Mana', w.manaCost]);
+        for (const [k, v] of rows) {
+          const a = document.createElement('span');
+          a.textContent = k;
+          const b = document.createElement('b');
+          b.textContent = v;
+          stats.append(a, b);
+        }
+        card.append(title, stats);
+        if (w.affix) {
+          const af = document.createElement('div');
+          af.className = 'inv-affix';
+          af.textContent = w.affix.desc;
+          card.append(af);
+        }
+      }
+      grid.appendChild(card);
+    });
+    inv.appendChild(grid);
+    const foot = document.createElement('div');
+    foot.className = 'inv-foot';
+    foot.textContent = `Vigor ${Math.ceil(player.hp)}/${S.maxHp} · Endurance ${S.maxStamina}${S.maxMana ? ` · Mana ${S.maxMana}` : ''} · Flasks ${player.flasks}/${player.maxFlasks} · Parry ${Math.round(player.parryWindow * 1000)} ms   —   [1-3] switch · [G] drop · [Tab] close`;
+    inv.appendChild(foot);
   }
 
   show() { this.root.classList.remove('hidden'); }
   hide() { this.root.classList.add('hidden'); }
 
   setFloor(depth, name) {
-    this.floorNum.textContent = toRoman(depth);
+    this.floorNum.textContent = depth ? toRoman(depth) : '⚜';
     this.floorName.textContent = name;
   }
 
@@ -110,7 +244,33 @@ export class HUD {
     this.bossEl.classList.add('hidden');
   }
 
-  update(dt, player) {
+  update(dt, player, camera) {
+    if (player.stats.maxMana) this.mpFill.style.transform = `scaleX(${clamp(player.mana / player.stats.maxMana, 0, 1)})`;
+    const cdMax = player.classDef.skill.cooldown;
+    const cd = clamp(player.skillCd / cdMax, 0, 1);
+    this.skillCd.style.background = cd > 0 ? `conic-gradient(rgba(0,0,0,0.72) ${cd * 360}deg, transparent 0)` : 'transparent';
+    this.skillSlot.classList.toggle('ready', cd === 0);
+    this.flaskCount.textContent = player.flasks;
+    this.flaskSlot.classList.toggle('empty', player.flasks === 0);
+    if (this.toastTimer > 0) {
+      this.toastTimer -= dt;
+      if (this.toastTimer <= 0) this.toastEl.classList.remove('show');
+    }
+    const w = window.innerWidth, h = window.innerHeight;
+    for (let i = this.numbers.length - 1; i >= 0; i--) {
+      const n = this.numbers[i];
+      n.t += dt;
+      _p.copy(n.pos);
+      _p.y += n.t * 0.9;
+      _p.project(camera);
+      if (n.t > 0.9 || _p.z > 1) {
+        n.div.remove();
+        this.numbers.splice(i, 1);
+        continue;
+      }
+      n.div.style.transform = `translate(${(_p.x * 0.5 + 0.5) * w}px, ${(-_p.y * 0.5 + 0.5) * h}px) translate(-50%, -50%)`;
+      n.div.style.opacity = String(1 - Math.max(0, n.t - 0.5) / 0.4);
+    }
     const S = player.stats;
     this.hpBar.style.width = `${S.maxHp * 2.6}px`;
     this.stBar.style.width = `${S.maxStamina * 2.2}px`;

@@ -134,3 +134,72 @@ export function riposteGlyph() {
   ctx.fillRect(-2, -2, 4, 4);
   return finish(c, { srgb: true, nearest: true });
 }
+
+export function planks() {
+  const size = 64;
+  const [c, ctx] = canvas(size);
+  const palette = ['#5a4030', '#4e3828', '#634634', '#553c2c'];
+  const bw = 8;
+  for (let x = 0; x < size; x += bw) {
+    let y = -randInt(0, 40);
+    while (y < size) {
+      const len = randInt(24, 48);
+      ctx.fillStyle = pick(palette);
+      ctx.fillRect(x, y, bw - 1, len - 1);
+      ctx.fillStyle = 'rgba(0,0,0,0.35)';
+      ctx.fillRect(x, y + len - 1, bw, 1);
+      y += len;
+    }
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(x + bw - 1, 0, 1, size);
+  }
+  for (let i = 0; i < 300; i++) {
+    ctx.fillStyle = `rgba(20,10,0,${rand(0.05, 0.2)})`;
+    ctx.fillRect(randInt(0, size), randInt(0, size), 1, randInt(2, 6));
+  }
+  return finish(c);
+}
+
+/** Rows of book spines for shelves. */
+export function books() {
+  const size = 64;
+  const [c, ctx] = canvas(size);
+  ctx.fillStyle = '#1c120c';
+  ctx.fillRect(0, 0, size, size);
+  const palette = ['#6a1c1c', '#1c3048', '#2c4428', '#5a4222', '#3a2438', '#7a5a2a', '#403a30', '#8a2a1a'];
+  const rows = 4, rh = size / rows;
+  for (let r = 0; r < rows; r++) {
+    let x = 0;
+    while (x < size) {
+      const w = randInt(2, 4), h = rh - randInt(2, 5);
+      ctx.fillStyle = pick(palette);
+      ctx.fillRect(x, r * rh + (rh - h) - 1, w, h);
+      ctx.fillStyle = 'rgba(220,190,120,0.35)';
+      if (Math.random() < 0.5) ctx.fillRect(x, r * rh + (rh - h) + 2, w, 1);
+      x += w + (Math.random() < 0.1 ? randInt(2, 5) : 0);
+    }
+    ctx.fillStyle = '#3a2618';
+    ctx.fillRect(0, r * rh + rh - 1, size, 1);
+  }
+  return finish(c);
+}
+
+/** Slate roof tiles. */
+export function roofTiles() {
+  const size = 64;
+  const [c, ctx] = canvas(size);
+  ctx.fillStyle = '#26292e';
+  ctx.fillRect(0, 0, size, size);
+  const palette = ['#3a3e44', '#34383e', '#40444a', '#2e3238'];
+  for (let r = 0; r < 8; r++) {
+    const off = r % 2 ? 4 : 0;
+    for (let x = -8; x < size; x += 8) {
+      ctx.fillStyle = pick(palette);
+      ctx.fillRect(x + off + 1, r * 8 + 1, 7, 7);
+      ctx.fillStyle = 'rgba(0,0,0,0.35)';
+      ctx.fillRect(x + off + 1, r * 8 + 7, 7, 1);
+    }
+  }
+  speckle(ctx, size, 300, 0.15);
+  return finish(c);
+}

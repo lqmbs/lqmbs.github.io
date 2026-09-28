@@ -13,6 +13,7 @@ export class World {
     this.surfaces = [];
     this.circles = [];
     this.boxes = [];
+    this.minWalkY = -Infinity;
   }
 
   addSurface(s) {
@@ -37,6 +38,11 @@ export class World {
 
   addRing(cx, cz, r0, r1, y, { thick = 100, parapet = true, tag = 'hub', style = 'balustrade' } = {}) {
     return this.addSurface({ kind: 'ring', cx, cz, r0, r1, y, top: y, bottom: y - thick, parapet, tag, style });
+  }
+
+  /** Terrain: `fn(x, z)` returns the ground height. Everything below `minWalkY` is water. */
+  addField(fn, { tag = 'terrain' } = {}) {
+    return this.addSurface({ kind: 'field', fn, top: Infinity, bottom: -Infinity, parapet: false, tag });
   }
 
   addCircle(x, z, r, y0, y1) {
@@ -76,6 +82,8 @@ export class World {
         const d = Math.hypot(x - s.cx, z - s.cz);
         return d >= s.r0 && d <= s.r1 ? s.y : null;
       }
+      case 'field':
+        return s.fn(x, z);
     }
     return null;
   }
@@ -94,7 +102,7 @@ export class World {
     for (const s of this.surfaces) {
       const h = this.heightOf(s, x, z);
       if (h === null || h <= feetY + STEP_HEIGHT) continue;
-      const bottom = s.kind === 'ramp' ? h - (s.top - s.bottom) : s.bottom;
+      const bottom = s.kind === 'ramp' ? h - (s.top - s.bottom) : s.kind === 'field' ? -Infinity : s.bottom;
       if (bottom < feetY + height) return true;
     }
     return false;
@@ -152,6 +160,10 @@ export class World {
   move(pos, feetY, dx, dz, r, height, { allowFall = true, maxDrop = 1.2 } = {}) {
     const ok = (x, z) => {
       if (this.blockedAt(x, z, r, feetY, height)) return false;
+      if (this.minWalkY > -Infinity) {
+        const w = this.groundAt(x, z, feetY);
+        if (w === null || w < this.minWalkY) return false;
+      }
       if (allowFall) return true;
       const g = this.groundAt(x, z, feetY);
       return g !== null && feetY - g <= maxDrop;

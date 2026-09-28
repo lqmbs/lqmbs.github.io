@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
 import { clamp, damp, lerp, rand, easeOut, angleDiff, flicker } from './util.js';
+import { CLASSES } from './classes.js';
+import { makeWeapon, buildWeaponModel, buildShieldModel, weaponMaterials } from './weapons.js';
 
 const _fwd = new THREE.Vector3();
 const _right = new THREE.Vector3();
@@ -8,12 +10,16 @@ const _right = new THREE.Vector3();
 /** Our yaw convention: the camera looks along (-sin yaw, 0, -cos yaw). */
 export const yawOf = (dx, dz) => Math.atan2(-dx, -dz);
 
+export const WEAPON_SLOTS = 3;
+const FLASK_HEAL = 0.4;
+
 export class Player {
   constructor(game) {
     this.game = game;
     this.pos = new THREE.Vector3();
     this.vel = new THREE.Vector3();
     this.knock = new THREE.Vector3();
+    this.skillDir = new THREE.Vector3();
     this.radius = CONFIG.player.radius;
     this.height = CONFIG.player.height;
     this.hitSet = new Set();
@@ -29,32 +35,52 @@ export class Player {
     game.camera.add(this.lantern);
 
     this.viewmodel = new Viewmodel(game, this);
-    this.reset();
+    this.yaw = 0;
+    this.pitch = 0;
+    this.setClass('knight');
   }
 
-  reset() {
+  // ---- Loadout ---------------------------------------------------------------
+
+  setClass(id) {
+    this.classDef = CLASSES[id];
+    this.resetLoadout();
+  }
+
+  /** Fresh start for the current class: base stats, starting weapon, no relics. */
+  resetLoadout() {
     const P = CONFIG.player;
+    const C = this.classDef.stats;
     this.stats = {
-      maxHp: P.maxHp,
-      maxStamina: P.maxStamina,
-      staminaRegen: P.staminaRegen,
-      speed: P.speed,
-      damage: P.attack.damage,
+      maxHp: C.maxHp,
+      maxStamina: C.maxStamina,
+      staminaRegen: C.staminaRegen,
+      speed: C.speed,
+      maxMana: C.maxMana,
+      manaRegen: C.manaRegen,
+      parryWindow: C.parryWindow,
+      blockReduction: C.blockReduction,
+      blockStaminaMult: C.blockStaminaMult,
+      riposteMult: P.riposteMult * (1 + (C.riposteBonus || 0)),
+      damageMult: 1,
       attackSpeed: 1,
       reach: 1,
       lifesteal: 0,
-      lightRadius: 1,
-      parryWindow: P.guard.parryWindow,
-      blockReduction: P.guard.blockReduction,
-      blockStaminaMult: P.guard.blockStaminaMult,
-      riposteMult: P.riposteMult,
+      lightRadius: C.lightRadius,
       parryDamage: 0,
     };
     this.hp = this.stats.maxHp;
     this.stamina = this.stats.maxStamina;
-    this.staminaDelay = 0;
-    this.invuln = 0;
+    this.mana = this.stats.maxMana;
+    this.maxFlasks = 3;
+    this.flasks = this.maxFlasks;
+    this.weapons = [makeWeapon(this.classDef.weapon), null, null];
+    this.activeSlot = 0;
     this.itemCounts = new Map();
+    this.skillCd = 0;
+    this.staminaDelay = 0;
+    this.manaDelay = 0;
+    this.invuln = 0;
     this.state = 'idle';
     this.stateTime = 0;
     this.comboSide = -1;
@@ -64,17 +90,71 @@ export class Player {
     this.grounded = true;
     this.vel.set(0, 0, 0);
     this.knock.set(0, 0, 0);
-    this.yaw = 0;
-    this.pitch = 0;
     this.bobPhase = 0;
     this.stepDist = 0;
     this.sprinting = false;
     this.deathK = 0;
+    this.viewmodel.equip();
+  }
+
+  reset() { this.resetLoadout(); }
+
+  get weapon() { return this.weapons[this.activeSlot]; }
+  get offhand() {
+    if (this.weapon.dual) return 'dagger';
+    return this.classDef.offhand === 'dagger' ? 'lantern' : this.classDef.offhand;
+  }
+
+  /** Put a weapon in a free slot, or swap it with the one in hand. Returns the displaced weapon. */
+  takeWeapon(w) {
+    const free = this.weapons.indexOf(null);
+    let displaced = null;
+    if (free >= 0) {
+      this.weapons[free] = w;
+      this.activeSlot = free;
+    } else {
+      displaced = this.weapons[this.activeSlot];
+      this.weapons[this.activeSlot] = w;
+    }
+    this.setState('swap');
+    this.viewmodel.equip();
+    return displaced;
+  }
+
+  /** Remove the weapon in hand (never the last one). */
+  dropWeapon() {
+    if (this.weapons.filter(Boolean).length <= 1) return null;
+    const w = this.weapons[this.activeSlot];
+    this.weapons[this.activeSlot] = null;
+    this.activeSlot = this.weapons.findIndex(Boolean);
+    this.setState('swap');
+    this.viewmodel.equip();
+    return w;
+  }
+
+  switchTo(slot) {
+    if (slot === this.activeSlot || !this.weapons[slot]) return;
+    this.activeSlot = slot;
+    this.setState('swap');
+    this.viewmodel.equip();
+    this.game.audio.play('swap');
+  }
+
+  cycleWeapon(dir) {
+    for (let i = 1; i < WEAPON_SLOTS; i++) {
+      const s = (this.activeSlot + dir * i + WEAPON_SLOTS) % WEAPON_SLOTS;
+      if (this.weapons[s]) return this.switchTo(s);
+    }
   }
 
   get alive() { return this.state !== 'dead'; }
   get forward() { return _fwd.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw)); }
   get eyePosition() { return new THREE.Vector3(this.pos.x, this.pos.y + CONFIG.player.eyeHeight, this.pos.z); }
+
+  /** Exact look direction including pitch. */
+  get aim() {
+    return new THREE.Vector3(0, 0, -1).applyEuler(new THREE.Euler(this.pitch, this.yaw, 0, 'YXZ'));
+  }
 
   setState(s) {
     this.state = s;
@@ -96,16 +176,19 @@ export class Player {
 
   enterGuard() {
     const now = this.game.time;
-    // Mashing the guard button forfeits the parry window — unless you're mid-deflection chain.
     this.parryEligible = now - this.lastGuardPress > CONFIG.player.guard.spamLockout || now - this.lastParry < 0.7;
     this.lastGuardPress = now;
     this.game.input.consume('guard');
     this.setState('guard');
   }
 
+  get parryWindow() { return this.stats.parryWindow + (this.weapon.parryBonus || 0); }
+
   inParryWindow() {
-    return this.state === 'guard' && this.parryEligible && this.stateTime <= this.stats.parryWindow;
+    return this.state === 'guard' && this.parryEligible && this.stateTime <= this.parryWindow;
   }
+
+  dodging() { return this.state === 'skill' && this.skillId === 'sidestep' && this.stateTime < 0.24; }
 
   facing(pos, maxAngle = 1.3) {
     const dx = pos.x - this.pos.x, dz = pos.z - this.pos.z;
@@ -117,7 +200,7 @@ export class Player {
    * `perilous` attacks ignore guard entirely — you must step out of the way.
    */
   receiveAttack(attacker, { damage, perilous = false, from }) {
-    if (!this.alive || this.invuln > 0 || this.game.transition) return 'miss';
+    if (!this.alive || this.invuln > 0 || this.game.transition || this.dodging()) return 'miss';
     const src = from || attacker.pos;
     if (!perilous && this.state === 'guard' && this.facing(src)) {
       if (this.inParryWindow()) {
@@ -164,16 +247,25 @@ export class Player {
     this.game.onPlayerDeath();
   }
 
+  revive() {
+    this.hp = this.stats.maxHp;
+    this.stamina = this.stats.maxStamina;
+    this.mana = this.stats.maxMana;
+    this.flasks = this.maxFlasks;
+    this.deathK = 0;
+    this.setState('idle');
+  }
+
   // ---- Attack --------------------------------------------------------------
 
   attackTimings() {
-    const A = CONFIG.player.attack;
-    const s = this.stats.attackSpeed;
-    return { windup: A.windup / s, active: A.active / s, recovery: A.recovery / s };
+    const w = this.weapon;
+    const s = w.speed * this.stats.attackSpeed;
+    return { windup: w.windup / s, active: w.active / s, recovery: w.recovery / s };
   }
 
   tryAttack() {
-    if (!this.spendStamina(CONFIG.player.attack.cost)) return false;
+    if (!this.spendStamina(this.weapon.cost)) return false;
     this.comboSide *= -1;
     this.hitSet.clear();
     this.slashed = false;
@@ -185,15 +277,30 @@ export class Player {
     const { windup, active, recovery } = this.attackTimings();
     const t = this.stateTime;
     const input = this.game.input;
+    const w = this.weapon;
     if (t < windup) return;
     if (t < windup + active) {
       if (!this.slashed) {
         this.slashed = true;
-        this.game.audio.play('swing');
-        this.viewmodel.slash(this.comboSide, active);
-        this.knock.addScaledVector(this.forward, 2.5);
+        if (w.kind === 'cast') {
+          if (this.mana >= w.manaCost) {
+            this.mana -= w.manaCost;
+            this.manaDelay = 0.8;
+            this.game.castBolt(this, w);
+            this.fizzle = false;
+          } else {
+            this.fizzle = true;
+            this.game.audio.play('empty');
+            this.game.hud.flashMana();
+          }
+        } else {
+          this.game.audio.play(w.kind === 'heavy' ? 'swing-heavy' : 'swing');
+          this.viewmodel.slash(this.comboSide, active);
+          this.knock.addScaledVector(this.forward, w.kind === 'thrust' ? 4 : w.kind === 'heavy' ? 3 : 2.5);
+        }
       }
-      this.checkHits();
+      if (w.kind !== 'cast') this.checkHits();
+      else if (this.fizzle) this.checkHits({ damage: 5, reach: 1.8, arc: 1.4, posture: 2 });
       return;
     }
     if (t < windup + active + recovery) {
@@ -206,9 +313,9 @@ export class Player {
     else this.setState('idle');
   }
 
-  checkHits() {
-    const A = CONFIG.player.attack;
-    const reach = A.reach * this.stats.reach;
+  checkHits(override = null) {
+    const w = override || this.weapon;
+    const reach = w.reach * this.stats.reach;
     for (const e of this.game.room.enemies) {
       if (!e.active || this.hitSet.has(e)) continue;
       const dx = e.pos.x - this.pos.x, dz = e.pos.z - this.pos.z;
@@ -216,11 +323,12 @@ export class Player {
       if (Math.abs(dy) > 2.2) continue;
       const d = Math.hypot(dx, dz);
       if (d - e.radius > reach) continue;
-      if (d > e.radius + 0.5 && Math.abs(angleDiff(this.yaw, yawOf(dx, dz))) > A.arc / 2) continue;
+      if (d > e.radius + 0.5 && Math.abs(angleDiff(this.yaw, yawOf(dx, dz))) > w.arc / 2) continue;
       this.hitSet.add(e);
       const dir = new THREE.Vector3(dx / (d || 1), 0, dz / (d || 1));
-      const result = e.receiveHit(this.stats.damage * rand(0.9, 1.1), dir, this);
-      this.game.onEnemyHit(e, result, dir);
+      const dmg = w.damage * this.stats.damageMult * rand(0.9, 1.1);
+      const result = e.receiveHit(dmg, dir, this, { posture: w.posture, burn: w.burn || 0 });
+      this.game.onEnemyHit(e, result, dir, dmg);
       if (result === 'blocked') {
         this.stamina = Math.max(0, this.stamina - 8);
         this.setState('recoil');
@@ -228,6 +336,80 @@ export class Player {
         return;
       }
     }
+  }
+
+  // ---- Skills & consumables -------------------------------------------------
+
+  trySkill() {
+    const sk = this.classDef.skill;
+    if (this.skillCd > 0 || !['idle', 'guard', 'hurt', 'recoil'].includes(this.state)) {
+      if (this.skillCd > 0) this.game.hud.flashSkill();
+      return;
+    }
+    if (sk.stamina && !this.spendStamina(sk.stamina)) return;
+    this.skillId = sk.id;
+    this.skillCd = sk.cooldown;
+    this.skillFired = false;
+    this.hitSet.clear();
+    if (sk.id === 'sidestep') {
+      const [sx, f] = this.game.input.moveAxes();
+      const fw = this.forward;
+      _right.set(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
+      this.skillDir.set(fw.x * f + _right.x * sx, 0, fw.z * f + _right.z * sx);
+      if (this.skillDir.lengthSq() < 0.01) this.skillDir.copy(fw).negate();
+      this.skillDir.normalize();
+      this.game.audio.play('dodge');
+    }
+    this.setState('skill');
+  }
+
+  updateSkill() {
+    const t = this.stateTime;
+    switch (this.skillId) {
+      case 'bash': {
+        if (t > 0.1 && t < 0.3) {
+          this.knock.copy(this.forward).multiplyScalar(9);
+          if (!this.skillFired) {
+            this.skillFired = true;
+            this.game.audio.play('bash');
+          }
+          for (const e of this.game.room.enemies) {
+            if (!e.active || this.hitSet.has(e)) continue;
+            const dx = e.pos.x - this.pos.x, dz = e.pos.z - this.pos.z;
+            const d = Math.hypot(dx, dz);
+            if (d - e.radius > 1.6 || Math.abs(angleDiff(this.yaw, yawOf(dx, dz))) > 0.9 || Math.abs(e.pos.y - this.pos.y) > 2) continue;
+            this.hitSet.add(e);
+            const dir = new THREE.Vector3(dx / (d || 1), 0, dz / (d || 1));
+            e.receiveBash(dir);
+            this.game.onEnemyHit(e, e.alive ? 'bash' : 'kill', dir, 8);
+          }
+        }
+        if (t > 0.55) this.setState('idle');
+        break;
+      }
+      case 'sidestep':
+        if (t < 0.22) this.knock.copy(this.skillDir).multiplyScalar(13 * (1 - t / 0.3));
+        if (t > 0.34) this.setState('idle');
+        break;
+      case 'flare':
+        if (t > 0.15 && !this.skillFired) {
+          this.skillFired = true;
+          this.game.flare(this);
+        }
+        if (t > 0.5) this.setState('idle');
+        break;
+    }
+  }
+
+  tryFlask() {
+    if (this.flasks <= 0 || !['idle', 'guard'].includes(this.state)) {
+      if (this.flasks <= 0) this.game.audio.play('empty');
+      return;
+    }
+    this.flasks--;
+    this.healed = false;
+    this.setState('drink');
+    this.game.audio.play('drink');
   }
 
   // ---- Frame ---------------------------------------------------------------
@@ -248,6 +430,19 @@ export class Player {
     this.stateTime += dt;
     this.invuln = Math.max(0, this.invuln - dt);
     this.staminaDelay = Math.max(0, this.staminaDelay - dt);
+    this.manaDelay = Math.max(0, this.manaDelay - dt);
+    this.skillCd = Math.max(0, this.skillCd - dt);
+    if (this.manaDelay <= 0 && this.alive) this.mana = Math.min(S.maxMana, this.mana + S.manaRegen * dt);
+
+    if (this.alive && this.game.menuOpen === false) {
+      if (input.wasPressed('KeyQ')) this.trySkill();
+      if (input.wasPressed('KeyF')) this.tryFlask();
+      if (['idle', 'guard'].includes(this.state)) {
+        for (let i = 0; i < WEAPON_SLOTS; i++) if (input.wasPressed(`Digit${i + 1}`)) this.switchTo(i);
+        if (input.consume('next')) this.cycleWeapon(1);
+        if (input.consume('prev')) this.cycleWeapon(-1);
+      }
+    }
 
     switch (this.state) {
       case 'idle':
@@ -260,6 +455,20 @@ export class Player {
         break;
       case 'attack':
         this.updateAttack();
+        break;
+      case 'skill':
+        this.updateSkill();
+        break;
+      case 'drink':
+        if (!this.healed && this.stateTime > 0.4) {
+          this.healed = true;
+          this.hp = Math.min(S.maxHp, this.hp + S.maxHp * FLASK_HEAL);
+          this.game.onFlaskDrunk();
+        }
+        if (this.stateTime > 0.75) this.setState('idle');
+        break;
+      case 'swap':
+        if (this.stateTime > 0.28) this.setState('idle');
         break;
       case 'recoil':
         if (this.stateTime > 0.4) this.setState('idle');
@@ -276,9 +485,9 @@ export class Player {
     // Movement.
     const [strafe, fwdAxis] = this.alive ? input.moveAxes() : [0, 0];
     const moving = strafe !== 0 || fwdAxis !== 0;
-    const mult = { idle: 1, guard: 0.5, attack: 0.3, recoil: 0.3, guardbreak: 0.15, hurt: 0.4, dead: 0 }[this.state];
+    const mult = { idle: 1, guard: 0.5, attack: 0.3, recoil: 0.3, guardbreak: 0.15, hurt: 0.4, dead: 0, skill: 0.4, drink: 0.35, swap: 0.8 }[this.state];
     this.sprinting = this.state === 'idle' && fwdAxis > 0 && input.down('ShiftLeft', 'ShiftRight') && this.stamina > 0 && this.grounded;
-    let speed = (this.sprinting ? P.sprintSpeed : S.speed) * mult;
+    const speed = (this.sprinting ? S.speed * (P.sprintSpeed / P.speed) : S.speed) * mult;
     if (this.sprinting) {
       this.stamina = Math.max(0, this.stamina - P.sprintCost * dt);
       this.staminaDelay = 0.3;
@@ -316,7 +525,7 @@ export class Player {
       this.vel.y = 0;
       this.grounded = true;
     } else if (wasGrounded && ground !== null && this.vel.y <= 0 && this.pos.y - ground < 0.6) {
-      this.pos.y = ground;  // stick to stairs going down
+      this.pos.y = ground;
       this.vel.y = 0;
     } else {
       this.pos.y = newY;
@@ -324,7 +533,6 @@ export class Player {
     }
     if (this.pos.y < -16 && this.alive) this.game.onPlayerFell();
 
-    // Footsteps.
     const hs = Math.hypot(this.vel.x, this.vel.z);
     if (this.grounded && moving && hs > 0.5) {
       this.stepDist += hs * dt;
@@ -346,15 +554,18 @@ export class Player {
     const sh = this.game.shakeOffset;
     if (this.state === 'dead') this.deathK = Math.min(1, this.deathK + dt * 1.2);
     const k = easeOut(this.deathK);
-    cam.position.set(this.pos.x, this.pos.y + lerp(P.eyeHeight, 0.35, k) + bob + sh.y * 0.1, this.pos.z);
-    this.roll = damp(this.roll || 0, -strafe * 0.025, 6, dt);
+    const dip = this.dodging() ? Math.sin((this.stateTime / 0.24) * Math.PI) * 0.35 : 0;
+    cam.position.set(this.pos.x, this.pos.y + lerp(P.eyeHeight, 0.35, k) + bob - dip + sh.y * 0.1, this.pos.z);
+    const lean = this.dodging() ? -this.skillDir.dot(_right.set(Math.cos(this.yaw), 0, -Math.sin(this.yaw))) * 0.12 : 0;
+    this.roll = damp(this.roll || 0, -strafe * 0.025 + lean, 8, dt);
     cam.rotation.set(this.pitch + sh.x * 0.04 + k * 0.4, this.yaw + sh.y * 0.04, this.roll + sh.z * 0.03 + k * 1.1, 'YXZ');
 
     const L = P.lantern;
     const t = this.game.time;
     const fl = 0.85 + 0.15 * flicker(t, 1.3);
-    this.lantern.intensity = L.intensity * fl * (this.alive ? 1 : 0.35);
-    this.lantern.distance = L.distance * this.stats.lightRadius;
+    const flare = this.state === 'skill' && this.skillId === 'flare' ? 1 + Math.max(0, 1 - Math.abs(this.stateTime - 0.18) * 5) * 6 : 1;
+    this.lantern.intensity = L.intensity * this.game.lanternScale * fl * flare * (this.alive ? 1 : 0.35);
+    this.lantern.distance = L.distance * this.stats.lightRadius * (flare > 1 ? 1.6 : 1);
     this.viewmodel.update(dt, fl);
   }
 }
@@ -363,14 +574,65 @@ export class Player {
 // First-person viewmodel — rendered in its own scene over the world.
 // ============================================================================
 
-const POSES = {
-  idle: { p: [0.4, -0.42, -0.72], r: [-0.4, 0, 0.32] },
-  guard: { p: [0.1, -0.26, -0.6], r: [-0.12, 0.2, 1.38] },
-  recoil: { p: [0.62, -0.5, -0.55], r: [0.5, 0, -0.9] },
-  guardbreak: { p: [0.55, -0.85, -0.5], r: [0.9, 0, -1.1] },
-  hurt: { p: [0.5, -0.5, -0.66], r: [-0.1, 0, 0.6] },
-  dead: { p: [0.4, -1.4, -0.6], r: [1.2, 0, 0.5] },
+const P3 = (p, r) => ({ p, r });
+
+const MAIN_POSES = {
+  slash: { idle: P3([0.4, -0.42, -0.72], [-0.4, 0, 0.32]), guard: P3([0.1, -0.26, -0.6], [-0.12, 0.2, 1.38]) },
+  heavy: { idle: P3([0.44, -0.52, -0.72], [-0.3, 0, 0.55]), guard: P3([0.12, -0.3, -0.62], [-0.1, 0.2, 1.4]) },
+  thrust: { idle: P3([0.36, -0.44, -0.62], [-1.2, 0, 0.12]), guard: P3([0.12, -0.3, -0.6], [-0.3, 0.2, 1.3]) },
+  cast: { idle: P3([0.34, -0.38, -0.6], [-0.85, 0, 0.18]), guard: P3([0.1, -0.28, -0.55], [-0.3, 0.2, 1.2]) },
 };
+const COMMON_POSES = {
+  recoil: P3([0.62, -0.5, -0.55], [0.5, 0, -0.9]),
+  guardbreak: P3([0.55, -0.85, -0.5], [0.9, 0, -1.1]),
+  hurt: P3([0.5, -0.5, -0.66], [-0.1, 0, 0.6]),
+  dead: P3([0.4, -1.4, -0.6], [1.2, 0, 0.5]),
+  swap: P3([0.45, -0.95, -0.6], [0.6, 0, 0.3]),
+  drink: P3([0.5, -0.7, -0.6], [0.2, 0, 0.4]),
+};
+const MODEL_SCALE = { longsword: 0.6, daggers: 0.8, greatsword: 0.52, spear: 0.55, mace: 0.7, wand: 0.9, staff: 0.55 };
+
+const OFF_POSES = {
+  lantern: { idle: P3([-0.36, -0.29, -0.74], [0, 0.3, 0]), guard: P3([-0.42, -0.42, -0.68], [0, 0.3, 0]) },
+  shield: { idle: P3([-0.5, -0.52, -0.7], [0.25, 0.75, 0.15]), guard: P3([-0.12, -0.26, -0.55], [0, 0.08, 0]) },
+  dagger: { idle: P3([-0.4, -0.44, -0.7], [-0.4, 0, -0.32]), guard: P3([-0.06, -0.29, -0.6], [-0.12, -0.2, -1.38]) },
+};
+
+/** A hand whose pose is smoothed towards a target. */
+class Hand {
+  constructor(scene) {
+    this.root = new THREE.Group();
+    this.root.rotation.order = 'YXZ';
+    this.model = new THREE.Group();
+    this.root.add(this.model);
+    scene.add(this.root);
+    this.pos = new THREE.Vector3();
+    this.rot = new THREE.Vector3();
+  }
+
+  snapTo(pose) {
+    this.pos.set(...pose.p);
+    this.rot.set(...pose.r);
+  }
+
+  track(pose, rate, dt) {
+    const [px, py, pz] = pose.p, [rx, ry, rz] = pose.r;
+    this.pos.set(damp(this.pos.x, px, rate, dt), damp(this.pos.y, py, rate, dt), damp(this.pos.z, pz, rate, dt));
+    this.rot.set(damp(this.rot.x, rx, rate, dt), damp(this.rot.y, ry, rate, dt), damp(this.rot.z, rz, rate, dt));
+  }
+
+  apply(ox, oy, oz, krx = 0, krz = 0) {
+    this.root.position.set(this.pos.x + ox, this.pos.y + oy, this.pos.z + oz);
+    this.root.rotation.set(this.rot.x + krx, this.rot.y, this.rot.z + krz);
+  }
+
+  setModel(obj) {
+    this.model.clear();
+    if (obj) this.model.add(obj);
+  }
+}
+
+const mirror = (pose) => P3([-pose.p[0], pose.p[1], pose.p[2]], [pose.r[0], -pose.r[1], -pose.r[2]]);
 
 class Viewmodel {
   constructor(game, player) {
@@ -383,57 +645,55 @@ class Viewmodel {
     this.light = new THREE.PointLight(0xffa24a, 3.2, 3, 2);
     this.light.position.set(-0.4, -0.3, -0.55);
     this.scene.add(this.light);
+    this.M = weaponMaterials();
 
-    const steel = new THREE.MeshStandardMaterial({ color: 0xc4c8d2, roughness: 0.3, metalness: 0.25, flatShading: true });
-    const darkSteel = new THREE.MeshStandardMaterial({ color: 0x4a4d58, roughness: 0.55, metalness: 0.2, flatShading: true });
-    const leather = new THREE.MeshStandardMaterial({ color: 0x3a2618, roughness: 0.9, flatShading: true });
-    this.bladeMat = steel;
+    this.main = new Hand(this.scene);
+    this.off = new Hand(this.scene);
 
-    // Sword: grip at the origin, blade along +Y.
-    this.sword = new THREE.Group();
-    const add = (g, geo, mat, x, y, z) => {
+    this.lanternModel = this.buildLantern();
+    this.shieldModel = buildShieldModel(this.M);
+    this.shieldModel.scale.setScalar(0.62);
+    this.offDagger = buildWeaponModel('daggers', this.M);
+    this.offDagger.scale.setScalar(MODEL_SCALE.daggers);
+    this.flaskModel = this.buildFlask();
+
+    this.buildTrail();
+    this.sway = new THREE.Vector2();
+    this.kickAmount = 0;
+    this.lanternSwing = 0;
+    this.equippedUid = null;
+  }
+
+  buildLantern() {
+    const g = new THREE.Group();
+    const add = (geo, mat, x, y, z) => {
       const m = new THREE.Mesh(geo, mat);
       m.position.set(x, y, z);
       g.add(m);
       return m;
     };
-    add(this.sword, new THREE.BoxGeometry(0.13, 0.16, 0.15), darkSteel, 0, -0.02, 0.02);
-    add(this.sword, new THREE.BoxGeometry(0.05, 0.22, 0.05), leather, 0, 0.1, 0);
-    add(this.sword, new THREE.BoxGeometry(0.07, 0.07, 0.07), darkSteel, 0, -0.03, 0);
-    add(this.sword, new THREE.BoxGeometry(0.34, 0.045, 0.06), darkSteel, 0, 0.23, 0);
-    add(this.sword, new THREE.BoxGeometry(0.065, 1.05, 0.016), steel, 0, 0.78, 0);
-    add(this.sword, new THREE.BoxGeometry(0.018, 0.9, 0.02), darkSteel, 0, 0.72, 0);
-    add(this.sword, new THREE.ConeGeometry(0.033, 0.12, 4), steel, 0, 1.36, 0).rotation.y = Math.PI / 4;
-    // Gauntleted forearm trailing back towards the camera.
-    add(this.sword, new THREE.BoxGeometry(0.15, 0.14, 0.42), darkSteel, 0.02, -0.04, 0.26);
-    this.sword.scale.setScalar(0.6);
-    this.swordRoot = new THREE.Group();
-    this.swordRoot.rotation.order = 'YXZ';
-    this.swordRoot.add(this.sword);
-    this.scene.add(this.swordRoot);
-
-    // Lantern in the left hand.
-    this.lanternRoot = new THREE.Group();
-    const frame = darkSteel;
-    add(this.lanternRoot, new THREE.BoxGeometry(0.2, 0.03, 0.2), frame, 0, 0.14, 0);
-    add(this.lanternRoot, new THREE.BoxGeometry(0.2, 0.03, 0.2), frame, 0, -0.14, 0);
-    for (const [x, z] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) add(this.lanternRoot, new THREE.BoxGeometry(0.025, 0.28, 0.025), frame, x * 0.09, 0, z * 0.09);
-    this.flame = add(this.lanternRoot, new THREE.BoxGeometry(0.1, 0.18, 0.1), new THREE.MeshBasicMaterial({ color: 0xffb060 }), 0, 0, 0);
-    this.glass = add(this.lanternRoot, new THREE.BoxGeometry(0.16, 0.24, 0.16),
+    const frame = this.M.dark;
+    add(new THREE.BoxGeometry(0.2, 0.03, 0.2), frame, 0, 0.14, 0);
+    add(new THREE.BoxGeometry(0.2, 0.03, 0.2), frame, 0, -0.14, 0);
+    for (const [x, z] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) add(new THREE.BoxGeometry(0.025, 0.28, 0.025), frame, x * 0.09, 0, z * 0.09);
+    this.flame = add(new THREE.BoxGeometry(0.1, 0.18, 0.1), new THREE.MeshBasicMaterial({ color: 0xffb060 }), 0, 0, 0);
+    add(new THREE.BoxGeometry(0.16, 0.24, 0.16),
       new THREE.MeshBasicMaterial({ color: 0xff8a30, transparent: true, opacity: 0.25, blending: THREE.AdditiveBlending, depthWrite: false }), 0, 0, 0);
-    add(this.lanternRoot, new THREE.ConeGeometry(0.13, 0.1, 4), frame, 0, 0.2, 0).rotation.y = Math.PI / 4;
-    add(this.lanternRoot, new THREE.BoxGeometry(0.02, 0.16, 0.02), frame, 0, 0.3, 0);
-    add(this.lanternRoot, new THREE.BoxGeometry(0.08, 0.08, 0.26), darkSteel, 0, 0.38, 0.16);
-    this.lanternRoot.scale.setScalar(0.75);
-    this.scene.add(this.lanternRoot);
+    add(new THREE.ConeGeometry(0.13, 0.1, 4), frame, 0, 0.2, 0).rotation.y = Math.PI / 4;
+    add(new THREE.BoxGeometry(0.02, 0.16, 0.02), frame, 0, 0.3, 0);
+    add(new THREE.BoxGeometry(0.08, 0.08, 0.26), frame, 0, 0.38, 0.16);
+    g.scale.setScalar(0.75);
+    return g;
+  }
 
-    this.buildTrail();
-
-    this.pos = new THREE.Vector3(...POSES.idle.p);
-    this.rot = new THREE.Vector3(...POSES.idle.r);
-    this.sway = new THREE.Vector2();
-    this.kickAmount = 0;
-    this.lanternSwing = 0;
+  buildFlask() {
+    const g = new THREE.Group();
+    const glass = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 0.2, 7), new THREE.MeshBasicMaterial({ color: 0xc41e2a }));
+    g.add(glass);
+    const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.03, 0.08, 6), this.M.gold);
+    neck.position.y = 0.14;
+    g.add(neck);
+    return g;
   }
 
   buildTrail() {
@@ -475,6 +735,25 @@ class Viewmodel {
     this.trailT = 10;
   }
 
+  /** Rebuild the hand models for the player's current weapon and off-hand. */
+  equip() {
+    const pl = this.player;
+    const w = pl.weapon;
+    const model = buildWeaponModel(w.typeId, this.M, w.bolt?.color);
+    model.scale.setScalar(MODEL_SCALE[w.typeId] ?? 0.6);
+    this.main.setModel(model);
+    this.tip = null;
+    model.traverse((o) => { if (o.userData.tip) this.tip = o; });
+    const off = pl.offhand;
+    this.off.setModel(off === 'shield' ? this.shieldModel : off === 'dagger' ? this.offDagger : this.lanternModel);
+    if (this.equippedUid === null) {
+      this.main.snapTo(MAIN_POSES[w.kind].idle);
+      this.off.snapTo(OFF_POSES[off].idle);
+    }
+    this.equippedUid = w.uid;
+    this.trailUniforms.color.value.setHex(w.rarity.id === 'common' ? 0xffe0b0 : w.rarity.color);
+  }
+
   setAspect(a) {
     this.camera.aspect = a;
     this.camera.updateProjectionMatrix();
@@ -488,45 +767,85 @@ class Viewmodel {
   kick(amount) { this.kickAmount = Math.max(this.kickAmount, amount); }
 
   slash(side, duration) {
+    const kind = this.player.weapon.kind;
+    if (kind === 'thrust' || kind === 'cast') return;
     this.trailT = 0;
     this.trailDur = duration;
     this.trailUniforms.side.value = side;
     this.trail.rotation.z = side * 0.28;
   }
 
+  attackPoses(kind, side) {
+    switch (kind) {
+      case 'thrust':
+        return { wind: P3([0.36, -0.36, -0.4], [-1.5, 0, 0.1]), end: P3([0.12, -0.3, -1.15], [-1.55, 0, 0.05]) };
+      case 'cast':
+        return { wind: P3([0.34, -0.16, -0.5], [-0.2, 0, 0.1]), end: P3([0.22, -0.3, -0.84], [-1.45, 0, 0.05]) };
+      case 'heavy':
+        return side > 0
+          ? { wind: P3([0.7, 0.05, -0.55], [-0.1, 0, -1.2]), end: P3([-0.6, -0.5, -0.7], [-1.05, 0, 1.9]) }
+          : { wind: P3([-0.4, 0.05, -0.55], [-0.1, 0, 1.3]), end: P3([0.66, -0.5, -0.7], [-1.05, 0, -1.8]) };
+      default:
+        return side > 0
+          ? { wind: P3([0.68, -0.12, -0.6], [-0.25, 0, -1.3]), end: P3([-0.55, -0.38, -0.7], [-0.95, 0, 1.7]) }
+          : { wind: P3([-0.35, -0.12, -0.6], [-0.25, 0, 1.35]), end: P3([0.62, -0.38, -0.7], [-0.95, 0, -1.6]) };
+    }
+  }
+
   update(dt, flameFlicker) {
     const pl = this.player;
+    const w = pl.weapon;
     const state = pl.state;
-    let target = POSES[state] || POSES.idle;
-    let snap = false;
+    const off = pl.offhand;
+    const kindPoses = MAIN_POSES[w.kind];
+    let mainTarget = COMMON_POSES[state] || (state === 'guard' ? kindPoses.guard : kindPoses.idle);
+    let offTarget = OFF_POSES[off][state === 'guard' ? 'guard' : 'idle'];
+    let mainRate = 14, offRate = 14;
+
+    // With a shield the shield does the guarding; the weapon stays back.
+    if (off === 'shield' && state === 'guard') mainTarget = kindPoses.idle;
+    if (state === 'dead' || state === 'guardbreak') offTarget = P3([-0.5, -1.2, -0.6], [0.6, 0, 0]);
 
     if (state === 'attack') {
       const { windup, active } = pl.attackTimings();
-      const s = pl.comboSide;
       const t = pl.stateTime;
-      const wind = { p: [s > 0 ? 0.68 : -0.35, -0.12, -0.6], r: [-0.25, 0, s > 0 ? -1.3 : 1.35] };
-      const end = { p: [s > 0 ? -0.55 : 0.62, -0.38, -0.7], r: [-0.95, 0, s > 0 ? 1.7 : -1.6] };
-      if (t < windup) {
-        target = wind;
-      } else if (t < windup + active) {
+      const offSwings = w.dual && pl.comboSide < 0;
+      let { wind, end } = this.attackPoses(w.kind, offSwings ? 1 : pl.comboSide);
+      if (offSwings) { wind = mirror(wind); end = mirror(end); }
+      let target;
+      let snap = false;
+      if (t < windup) target = wind;
+      else if (t < windup + active) {
         const k = easeOut((t - windup) / active);
-        target = {
-          p: wind.p.map((v, i) => lerp(v, end.p[i], k)),
-          r: wind.r.map((v, i) => lerp(v, end.r[i], k)),
-        };
+        target = P3(wind.p.map((v, i) => lerp(v, end.p[i], k)), wind.r.map((v, i) => lerp(v, end.r[i], k)));
         snap = true;
+      } else target = end;
+      if (offSwings) { offTarget = target; offRate = snap ? 60 : 30; }
+      else { mainTarget = target; mainRate = snap ? 60 : 30; }
+    } else if (state === 'guard') {
+      mainRate = offRate = 26;
+    } else if (state === 'skill') {
+      const t = pl.stateTime;
+      if (pl.skillId === 'bash') {
+        offTarget = t < 0.1 ? P3([-0.2, -0.3, -0.4], [0, 0.1, 0]) : P3([-0.08, -0.25, -0.85], [0, 0, 0]);
+        offRate = 30;
+      } else if (pl.skillId === 'flare') {
+        offTarget = P3([-0.05, -0.12, -0.6], [0, 0, 0]);
+        offRate = 24;
       } else {
-        target = end;
+        mainTarget = P3([0.5, -0.6, -0.6], [-0.2, 0, 0.6]);
+        offTarget = P3([-0.5, -0.6, -0.6], [0, 0.3, 0]);
       }
+    } else if (state === 'drink') {
+      offTarget = P3([-0.1, -0.2, -0.35], [0.9, 0, 0.5]);
+      offRate = 18;
     }
 
-    const rate = snap ? 60 : state === 'attack' ? 30 : state === 'guard' ? 26 : 14;
-    this.pos.x = damp(this.pos.x, target.p[0], rate, dt);
-    this.pos.y = damp(this.pos.y, target.p[1], rate, dt);
-    this.pos.z = damp(this.pos.z, target.p[2], rate, dt);
-    this.rot.x = damp(this.rot.x, target.r[0], rate, dt);
-    this.rot.y = damp(this.rot.y, target.r[1], rate, dt);
-    this.rot.z = damp(this.rot.z, target.r[2], rate, dt);
+    this.main.track(mainTarget, mainRate, dt);
+    this.off.track(offTarget, offRate, dt);
+    const holdingFlask = this.off.model.children[0] === this.flaskModel;
+    if (state === 'drink' && !holdingFlask) this.off.setModel(this.flaskModel);
+    else if (state !== 'drink' && holdingFlask) this.equip();
 
     this.sway.multiplyScalar(Math.exp(-8 * dt));
     this.kickAmount = Math.max(0, this.kickAmount - dt * 5);
@@ -536,25 +855,31 @@ class Viewmodel {
     const breathe = Math.sin(this.game.time * 1.6) * 0.006;
     const kick = this.kickAmount * this.kickAmount;
 
-    this.swordRoot.position.set(this.pos.x + this.sway.x + bobX + kick * 0.05, this.pos.y + this.sway.y + bobY + breathe + kick * 0.09, this.pos.z + kick * 0.06);
-    this.swordRoot.rotation.set(this.rot.x - kick * 0.25, this.rot.y, this.rot.z + kick * 0.35);
-
-    const lg = state === 'guard' ? 1 : 0;
+    const guardHand = off === 'shield' || off === 'dagger' ? this.off : this.main;
+    const k = guardHand === this.main ? kick : 0;
+    this.main.apply(this.sway.x + bobX + k * 0.05, this.sway.y + bobY + breathe + k * 0.09, k * 0.06, -k * 0.25, k * 0.35);
+    const ko = guardHand === this.off ? kick : 0;
     this.lanternSwing = damp(this.lanternSwing, this.sway.x * 6 + bobX * 8, 4, dt);
-    this.lanternRoot.position.set(
-      -0.4 + this.sway.x * 0.8 - bobX * 0.6,
-      -0.38 - lg * 0.12 + this.sway.y * 0.8 + bobY * 0.8 - (state === 'dead' ? 1 : 0),
-      -0.72 + lg * 0.05);
-    this.lanternRoot.rotation.set(0, 0.3, this.lanternSwing * 0.8);
-    this.flame.scale.setScalar(0.8 + 0.25 * flameFlicker);
-    this.light.intensity = 3.2 * flameFlicker;
-    this.light.position.copy(this.lanternRoot.position);
+    this.off.apply(this.sway.x * 0.8 - bobX * 0.6 - ko * 0.04, this.sway.y * 0.8 + bobY * 0.8 + ko * 0.08, ko * 0.08, -ko * 0.2,
+      off === 'lantern' && state !== 'drink' ? this.lanternSwing * 0.8 : 0);
+
+    const flare = state === 'skill' && pl.skillId === 'flare' ? 1 + Math.max(0, 1 - Math.abs(pl.stateTime - 0.18) * 5) * 4 : 1;
+    this.flame.scale.setScalar((0.8 + 0.25 * flameFlicker) * flare);
+    if (off === 'lantern') {
+      this.light.intensity = 3.2 * flameFlicker * flare;
+      this.light.position.copy(this.off.root.position);
+    } else {
+      // Lantern hangs at the belt: light the hands from below and behind, gently.
+      this.light.intensity = 1.2 * flameFlicker * flare;
+      this.light.position.set(-0.3, -0.9, 0.1);
+    }
+    if (this.tip) this.tip.scale.setScalar(state === 'attack' && pl.stateTime < pl.attackTimings().windup ? 1.8 : 1);
 
     this.trailT += dt;
     if (this.trailDur) {
-      const k = this.trailT / this.trailDur;
-      this.trailUniforms.head.value = Math.min(1.25, k * 1.25);
-      this.trailUniforms.opacity.value = k < 1 ? 1 : Math.max(0, 1 - (this.trailT - this.trailDur) / 0.12);
+      const tk = this.trailT / this.trailDur;
+      this.trailUniforms.head.value = Math.min(1.25, tk * 1.25);
+      this.trailUniforms.opacity.value = tk < 1 ? 1 : Math.max(0, 1 - (this.trailT - this.trailDur) / 0.12);
     }
   }
 }

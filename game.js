@@ -1,22 +1,31 @@
 import * as THREE from 'three';
 import { CONFIG, FLOOR_THEMES } from './src/config.js';
-import { rand, clamp, damp, flicker, toRoman } from './src/util.js';
+import { rand, clamp, damp, flicker, toRoman, chance, angleDiff } from './src/util.js';
 import { AudioEngine } from './src/audio.js';
 import { Input } from './src/input.js';
 import { RetroPass } from './src/post.js';
 import { ParticleSystem } from './src/particles.js';
 import * as Textures from './src/textures.js';
-import { Player } from './src/player.js';
+import { Player, yawOf } from './src/player.js';
 import { DungeonFloor } from './src/chamber.js';
+import { Hub } from './src/hub.js';
 import { HUD } from './src/hud.js';
+import { Menus } from './src/menus.js';
+import { Bolt } from './src/enemies.js';
+import { WeaponDrop } from './src/loot.js';
+import { rollWeapon } from './src/weapons.js';
+import { CLASSES } from './src/classes.js';
+
+const EXPEDITION_FLOORS = 3;
 
 /**
- * Ashen Descent — owns the loop, the run/floor/chamber flow and the combat feedback
+ * Ashen Descent — owns the loop, the hub/expedition flow, interaction, and the combat feedback
  * (hitstop, slow-motion, shake, sparks, sound) that ties the systems together.
  */
 class Game {
   constructor() {
     this.state = 'title';
+    this.mode = 'hub';
     this.time = 0;
     this.depth = 1;
     this.hitstop = 0;
@@ -25,26 +34,31 @@ class Game {
     this.flash = 0;
     this.fade = 1;
     this.trauma = 0;
+    this.lanternScale = 1;
+    this.menuOpen = false;
     this.shakeOffset = new THREE.Vector3();
     this.transition = null;
     this.effects = [];
     this.bolts = [];
+    this.focus = null;
 
     this.initRenderer();
     this.initMaterials();
     this.audio = new AudioEngine();
     this.input = new Input(this.renderer.domElement);
     this.hud = new HUD();
-    this.particles = new ParticleSystem(this.scene, 600, false);
-    this.glow = new ParticleSystem(this.scene, 700, true);
+    this.menus = new Menus(this);
+    this.particles = new ParticleSystem(this.scene, 700, false);
+    this.glow = new ParticleSystem(this.scene, 900, true);
     this.initLights();
     this.initMist();
 
     this.player = new Player(this);
     this.player.viewmodel.setAspect(this.camera.aspect);
+    this.hub = new Hub(this);
 
     this.bindUI();
-    this.newFloor();
+    this.enterHub(false);
     this.hud.hide();
 
     this.clock = new THREE.Clock();
@@ -63,7 +77,7 @@ class Game {
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x0a1426);
     this.scene.fog = new THREE.FogExp2(0x0a1426, CONFIG.fogDensity);
-    this.camera = new THREE.PerspectiveCamera(CONFIG.camera.fov, 1, 0.05, 260);
+    this.camera = new THREE.PerspectiveCamera(CONFIG.camera.fov, 1, 0.05, 900);
     this.scene.add(this.camera);
     this.post = new RetroPass(this.renderer);
     this.resize();
@@ -96,26 +110,36 @@ class Game {
     this.riposteTexture = Textures.riposteGlyph();
   }
 
-  /** A fixed pool of lights (so shaders never recompile), re-aimed at each chamber's props. */
+  /**
+   * A fixed pool of lights (so shaders rarely recompile), re-aimed at each area's props.
+   * The sun is only lit on the surface.
+   */
   initLights() {
     this.hemi = new THREE.HemisphereLight(0x4a6ab0, 0x0a0a12, 0.95);
     this.ambient = new THREE.AmbientLight(0x223055, 0.35);
     this.scene.add(this.hemi, this.ambient);
-    this.crystalLights = Array.from({ length: 5 }, () => new THREE.PointLight(0x4aa8ff, 0, 15, 1.5));
-    this.warmLights = Array.from({ length: 4 }, () => new THREE.PointLight(0xff7a30, 0, 13, 1.5));
+    this.poolLights = Array.from({ length: 9 }, () => new THREE.PointLight(0xffffff, 0, 14, 1.5));
     this.pedestalLight = new THREE.PointLight(0xffffff, 0, 8, 1.6);
-    this.scene.add(...this.crystalLights, ...this.warmLights, this.pedestalLight);
+    this.scene.add(...this.poolLights, this.pedestalLight);
+    this.sun = new THREE.DirectionalLight(0xe6e2d4, 0);
+    this.sun.position.set(-75, 95, 55);
+    this.sun.target.position.set(0, 0, 8);
+    const sc = this.sun.shadow.camera;
+    sc.left = -80; sc.right = 80; sc.top = 80; sc.bottom = -80; sc.near = 10; sc.far = 320;
+    this.sun.shadow.mapSize.set(2048, 2048);
+    this.sun.shadow.bias = -0.0008;
+    this.sun.shadow.normalBias = 0.04;
+    this.scene.add(this.sun, this.sun.target);
   }
 
-  /** Slow-drifting mist layers far below — the abyss breathing. */
+  /** Slow-drifting mist layers — the abyss breathing below, or sea fog on the surface. */
   initMist() {
     const tex = Textures.mist();
-    this.mist = [-5, -11, -19].map((y, i) => {
+    this.mist = [0, 1, 2].map((i) => {
       const t = tex.clone();
       t.repeat.set(3, 3);
       const mat = new THREE.MeshBasicMaterial({ map: t, transparent: true, opacity: 0.55 - i * 0.1, depthWrite: false, color: 0x5a7ab0 });
       const m = new THREE.Mesh(new THREE.PlaneGeometry(300, 300).rotateX(-Math.PI / 2), mat);
-      m.position.y = y;
       m.renderOrder = -1;
       m.userData.speed = [(i + 1) * 0.004, (i % 2 ? -1 : 1) * 0.003];
       this.scene.add(m);
@@ -123,18 +147,58 @@ class Game {
     });
   }
 
-  applyTheme() {
-    const t = this.theme;
-    this.scene.fog.color.setHex(t.fog);
-    this.scene.background.setHex(t.fog);
-    this.hemi.color.setHex(t.sky);
-    this.materials.crystal.color.setHex(t.crystal);
-    this.materials.crystal.emissive.setHex(t.crystal);
-    this.materials.windowCold.color.setHex(t.crystal);
-    for (const l of this.crystalLights) l.color.setHex(t.crystal);
-    for (const m of this.mist) m.material.color.setHex(t.sky).multiplyScalar(0.9);
-    this.player.viewmodel.hemi.color.setHex(t.sky);
-    this.post.uniforms.shadowTint.value.setHex(t.sky);
+  /** Surface (the Hold, overcast daylight) or depths (per-floor abyss theme). */
+  setEnvironment(env) {
+    const u = this.post.uniforms;
+    if (env === 'hub') {
+      this.scene.fog.color.setHex(0x6f787a);
+      this.scene.fog.density = 0.0115;
+      this.scene.background.setHex(0x737c7e);
+      this.hemi.color.setHex(0xaab6ba);
+      this.hemi.groundColor.setHex(0x3a3a2c);
+      this.hemi.intensity = 0.55;
+      this.ambient.color.setHex(0x708090);
+      this.ambient.intensity = 0.12;
+      this.sun.intensity = 1.7;
+      this.sun.castShadow = true;
+      this.lanternScale = 0.7;
+      [-0.65, 1.2, 3.4].forEach((y, i) => {
+        const m = this.mist[i];
+        m.position.y = y;
+        m.material.color.setHex(0xd4dad8);
+        m.material.opacity = [0.35, 0.22, 0.12][i];
+      });
+      this.player.viewmodel.hemi.color.setHex(0xb8c2c4);
+      this.player.viewmodel.hemi.intensity = 1.6;
+      u.shadowTint.value.setHex(0x506068);
+      this.audio.setMode('hub');
+    } else {
+      const t = this.theme;
+      this.scene.fog.color.setHex(t.fog);
+      this.scene.fog.density = CONFIG.fogDensity;
+      this.scene.background.setHex(t.fog);
+      this.hemi.color.setHex(t.sky);
+      this.hemi.groundColor.setHex(0x0a0a12);
+      this.hemi.intensity = 0.95;
+      this.ambient.color.setHex(0x223055);
+      this.ambient.intensity = 0.35;
+      this.sun.intensity = 0;
+      this.sun.castShadow = false;
+      this.lanternScale = 1;
+      this.materials.crystal.color.setHex(t.crystal);
+      this.materials.crystal.emissive.setHex(t.crystal);
+      this.materials.windowCold.color.setHex(t.crystal);
+      [-5, -11, -19].forEach((y, i) => {
+        const m = this.mist[i];
+        m.position.y = y;
+        m.material.color.setHex(t.sky).multiplyScalar(0.9);
+        m.material.opacity = 0.55 - i * 0.1;
+      });
+      this.player.viewmodel.hemi.color.setHex(t.sky);
+      this.player.viewmodel.hemi.intensity = 1.3;
+      u.shadowTint.value.setHex(t.sky);
+      this.audio.setMode('depths');
+    }
   }
 
   get difficulty() {
@@ -171,12 +235,14 @@ class Game {
 
   start() {
     this.audio.init();
+    this.audio.setMode(this.mode === 'hub' ? 'hub' : 'depths');
     this.input.requestLock();
     this.titleScreen.classList.add('hidden');
     this.hud.show();
     this.state = 'playing';
     this.input.clearBuffers();
-    this.hud.banner(this.theme.name, 'floor', 2.8);
+    this.hud.banner(this.hub.name, 'floor', 2.8);
+    this.hud.renderLoadout(this.player);
   }
 
   pause() {
@@ -192,33 +258,70 @@ class Game {
     this.clock.getDelta();
   }
 
+  /** Death screen dismissed: back to the Hold. */
   restart() {
-    if (this.state !== 'dead') return;
+    if (this.state !== 'dead' || this.mode !== 'run') return;
     this.deathScreen.classList.add('hidden');
     this.input.requestLock();
     this.runTransition(() => {
-      this.depth = 1;
-      this.player.reset();
-      this.hud.renderRelics(this.player);
-      this.hud.hideBoss();
-      this.newFloor();
+      this.enterHub(true);
       this.state = 'playing';
-      this.hud.banner(this.theme.name, 'floor', 2.8);
-    });
+      this.hud.banner(this.hub.name, 'floor', 2.8);
+    }, 0.4);
+  }
+
+  /** Arrive (or return) at the Roundtable Hold with a fresh loadout for the chosen class. */
+  enterHub(resetLoadout = true) {
+    this.mode = 'hub';
+    this.depth = 1;
+    this.floor?.dispose();
+    this.floor = null;
+    if (resetLoadout) this.player.resetLoadout();
+    this.hub.build();
+    this.setEnvironment('hub');
+    this.hud.setFloor(null, this.hub.name);
+    this.hud.setMinimapVisible(false);
+    this.hud.hideBoss();
+    this.enterArea(this.hub, this.hub.spawnPose);
+    this.hud.renderRelics(this.player);
+    this.hud.renderLoadout(this.player);
+  }
+
+  beginExpedition() {
+    this.audio.play('descend');
+    this.runTransition(() => {
+      this.mode = 'run';
+      this.depth = 1;
+      this.hub.clearEnemies();
+      this.player.resetLoadout();
+      this.hud.renderRelics(this.player);
+      this.hud.renderLoadout(this.player);
+      this.hud.setMinimapVisible(true);
+      this.newFloor();
+      this.hud.banner(this.hud.floorName.textContent, 'floor', 2.8);
+    }, 0.9);
   }
 
   newFloor() {
     this.floor?.dispose();
     this.floor = new DungeonFloor(this, this.depth);
-    this.applyTheme();
+    this.setEnvironment('depths');
     const name = this.depth > FLOOR_THEMES.length ? `${this.theme.name} ${toRoman(this.depth)}` : this.theme.name;
     this.hud.setFloor(this.depth, name);
+    this.player.flasks = this.player.maxFlasks;
     this.room = null;
     this.enterRoom(this.floor.start, null);
   }
 
   descend() {
     this.audio.play('descend');
+    if (this.depth >= EXPEDITION_FLOORS) {
+      this.runTransition(() => {
+        this.enterHub(true);
+        this.hud.banner('EXPEDITION COMPLETE', '', 4);
+      }, 1.2);
+      return;
+    }
     this.runTransition(() => {
       this.depth++;
       this.hud.hideBoss();
@@ -227,7 +330,8 @@ class Game {
     }, 0.9);
   }
 
-  enterRoom(room, entryDir) {
+  /** Shared entry for any area (hub or chamber): swap scenes, place the knight, aim the lights. */
+  enterArea(area, pose) {
     this.room?.exit();
     this.particles.clear();
     this.glow.clear();
@@ -235,14 +339,17 @@ class Game {
     for (const b of this.bolts) b.dispose();
     this.effects.length = 0;
     this.bolts.length = 0;
-    this.room = room;
-    room.build();
-
-    const pose = entryDir ? room.entryPose(entryDir) : { x: 0, y: 0, z: 3.4, yaw: 0 };
-    this.entry = { room, dir: entryDir, pose };
+    this.room = area;
+    area.build();
+    this.entry = { room: area, pose };
     this.placePlayer(pose);
-    room.enter();
-    this.assignLights(room);
+    area.enter();
+    this.assignLights(area);
+  }
+
+  enterRoom(room, entryDir) {
+    const pose = entryDir ? room.entryPose(entryDir) : { x: 0, y: 0, z: 3.4, yaw: 0 };
+    this.enterArea(room, pose);
     this.hud.drawMinimap(this.floor, room);
   }
 
@@ -258,21 +365,23 @@ class Game {
     p.updateCamera(0, 0);
   }
 
-  assignLights(room) {
-    const c = room.center;
+  assignLights(area) {
+    const c = area.center;
     const score = (s) => s.weight - 0.03 * Math.hypot(s.pos.x - c.x, s.pos.z - c.z);
-    const crystals = room.lightSpots.filter((s) => s.kind === 'crystal').sort((a, b) => score(b) - score(a));
-    const warm = room.lightSpots.filter((s) => s.kind === 'warm' && !s.gate).sort((a, b) => score(b) - score(a))
-      .concat(room.lightSpots.filter((s) => s.gate));
-    this.crystalLights.forEach((l, i) => {
-      const s = crystals[i];
-      l.userData.base = s ? 10 + s.weight * 6 : 0;
-      if (s) l.position.copy(s.pos);
-    });
-    this.warmLights.forEach((l, i) => {
-      const s = warm[i];
-      l.userData.base = s ? 7 + s.weight * 4 : 0;
-      if (s) l.position.copy(s.pos);
+    const crystalColor = this.theme.crystal;
+    const spots = [...area.lightSpots].sort((a, b) => score(b) - score(a) - (b.gate ? 1 : 0) + (a.gate ? 1 : 0));
+    this.poolLights.forEach((l, i) => {
+      const s = spots[i];
+      if (!s) {
+        l.userData.base = 0;
+        l.intensity = 0;
+        return;
+      }
+      l.position.copy(s.pos);
+      l.color.setHex(s.color ?? (s.kind === 'crystal' ? crystalColor : 0xff7a30));
+      l.distance = s.distance ?? (s.kind === 'crystal' ? 15 : 13);
+      l.userData.base = s.intensity ?? (s.kind === 'crystal' ? 10 + s.weight * 6 : 7 + s.weight * 4);
+      l.userData.flicker = s.kind !== 'crystal';
     });
   }
 
@@ -316,6 +425,74 @@ class Game {
     }, 0.6);
   }
 
+  // ---- Interaction, menus, inventory ---------------------------------------
+
+  /** The interactable the knight is looking at and close enough to use. */
+  findFocus() {
+    const p = this.player;
+    let best = null, bestScore = Infinity;
+    for (const it of this.room.interactables || []) {
+      const pos = it.position;
+      const d = Math.hypot(pos.x - p.pos.x, pos.z - p.pos.z);
+      if (d > it.radius || Math.abs(pos.y - p.pos.y) > 2.2) continue;
+      const off = Math.abs(angleDiff(p.yaw, yawOf(pos.x - p.pos.x, pos.z - p.pos.z)));
+      if (d > 1.2 && off > 0.9) continue;
+      const score = d + off * 2;
+      if (score < bestScore) { best = it; bestScore = score; }
+    }
+    return best;
+  }
+
+  openMenu(kind) {
+    this.menuOpen = true;
+    this.state = 'menu';
+    this.hud.setPrompt(null);
+    document.exitPointerLock?.();
+    this.menus.open(kind);
+  }
+
+  closeMenu() {
+    this.menus.close();
+    this.menuOpen = false;
+    this.state = 'playing';
+    this.input.clearBuffers();
+    this.input.requestLock();
+    this.clock.getDelta();
+  }
+
+  openClassMenu() { this.openMenu('class'); }
+  openSpawnMenu() { this.openMenu('spawn'); }
+
+  chooseClass(id) {
+    this.player.setClass(id);
+    this.hud.renderRelics(this.player);
+    this.hud.renderLoadout(this.player);
+    this.audio.play('pickup');
+    this.hud.banner(CLASSES[id].name.toUpperCase(), 'floor', 2);
+    this.flash = 0.4;
+  }
+
+  dropActiveWeapon() {
+    const w = this.player.dropWeapon();
+    if (!w) {
+      this.audio.play('empty');
+      return;
+    }
+    const p = this.player;
+    const pos = p.pos.clone().addScaledVector(p.forward, 1.3);
+    const g = this.room.world.groundAt(pos.x, pos.z, p.pos.y + 0.5);
+    pos.y = g ?? p.pos.y;
+    new WeaponDrop(this, this.room, w, pos);
+    this.audio.play('swap');
+    this.hud.renderLoadout(p);
+  }
+
+  onWeaponTaken(w) {
+    this.audio.play('pickup-weapon');
+    this.hud.toast(w.displayName, w.affix ? w.affix.desc : w.kind === 'cast' ? `${w.manaCost} mana per cast` : '', w.rarity.color);
+    this.hud.renderLoadout(this.player);
+  }
+
   // ---- Combat feedback -----------------------------------------------------
 
   shake(amount) { this.trauma = Math.min(1, this.trauma + amount); }
@@ -329,10 +506,43 @@ class Game {
     }));
   }
 
-  /** A point just in front of the knight's guard, where deflections spark. */
   guardPoint() {
     const p = this.player;
     return p.eyePosition.addScaledVector(p.forward, 0.9).add(new THREE.Vector3(0, -0.25, 0));
+  }
+
+  castBolt(player, w) {
+    const aim = player.aim;
+    const right = new THREE.Vector3(Math.cos(player.yaw), 0, -Math.sin(player.yaw));
+    const from = player.eyePosition.addScaledVector(aim, 0.7).addScaledVector(right, 0.2).add(new THREE.Vector3(0, -0.15, 0));
+    this.addBolt(new Bolt(this, from, aim, player, w.bolt.color, { damage: w.damage, speed: w.bolt.speed, burn: w.bolt.burn || w.burn, pierce: w.bolt.pierce, size: w.typeId === 'staff' ? 1.4 : 0.9 }));
+    this.audio.play('cast-player');
+    this.glow.burst(from, 8, () => ({ vel: new THREE.Vector3(rand(-1, 1), rand(-1, 1), rand(-1, 1)), life: 0.25, size: 0.04, color: w.bolt.color, drag: 3 }));
+  }
+
+  /** Lantern Mage: blind, stagger and ignite everything nearby. */
+  flare(player) {
+    this.audio.play('flare');
+    this.flash = 1;
+    this.shake(0.3);
+    const c = player.eyePosition;
+    this.glow.burst(c, 60, () => ({
+      vel: new THREE.Vector3(rand(-9, 9), rand(-3, 6), rand(-9, 9)), life: rand(0.3, 0.8), size: rand(0.05, 0.12), color: pick3(), drag: 2.5,
+    }));
+    for (const e of this.room.enemies) {
+      if (!e.active || e.pos.distanceTo(player.pos) > 9) continue;
+      e.stun(1.8);
+      e.ignite(4, 6);
+      e.flash = 0.2;
+    }
+  }
+
+  onFlaskDrunk() {
+    this.audio.play('heal');
+    this.flash = 0.25;
+    this.glow.burst(this.player.pos.clone().setY(this.player.pos.y + 0.8), 24, () => ({
+      vel: new THREE.Vector3(rand(-1.5, 1.5), rand(1, 3), rand(-1.5, 1.5)), life: rand(0.6, 1.2), size: 0.05, color: 0xff4a3a, drag: 2,
+    }));
   }
 
   onEnemyTelegraph(enemy, perilous) {
@@ -342,8 +552,8 @@ class Game {
     } else if (enemy.distToPlayer() < 14) this.audio.play('glint');
   }
 
-  onEnemyHit(enemy, result, dir) {
-    const S = this.player.stats;
+  onEnemyHit(enemy, result, dir, dmg = 0) {
+    const p = this.player;
     const c = enemy.pos.clone();
     c.y += enemy.height * 0.6;
     switch (result) {
@@ -354,6 +564,7 @@ class Game {
         this.sparks(c, 16);
         this.hitstop = Math.max(this.hitstop, 0.07);
         this.shake(0.2);
+        this.hud.damageNumber(c, 0, 'blocked');
         return;
       case 'riposte':
         this.audio.play('riposte');
@@ -362,13 +573,25 @@ class Game {
         this.shake(0.45);
         this.flash = 0.5;
         break;
+      case 'bash':
+        this.audio.play('hit');
+        this.sparks(c, 14, 0xffc080, 5);
+        this.hitstop = Math.max(this.hitstop, 0.09);
+        this.shake(0.3);
+        break;
+      case 'spell':
+        this.audio.play('hit');
+        this.hitstop = Math.max(this.hitstop, 0.03);
+        break;
       default:
         this.audio.play('hit');
         this.sparks(c, 10);
-        this.hitstop = Math.max(this.hitstop, 0.055);
-        this.shake(0.15);
+        this.hitstop = Math.max(this.hitstop, p.weapon.kind === 'heavy' ? 0.09 : 0.055);
+        this.shake(p.weapon.kind === 'heavy' ? 0.3 : 0.15);
     }
-    if (S.lifesteal > 0) this.player.hp = Math.min(S.maxHp, this.player.hp + S.lifesteal);
+    if (dmg > 0) this.hud.damageNumber(c, dmg, result === 'riposte' ? 'crit' : 'normal');
+    const leech = p.stats.lifesteal + (result === 'spell' ? 0 : p.weapon.lifesteal || 0);
+    if (leech > 0) p.hp = Math.min(p.stats.maxHp, p.hp + leech);
     this.particles.burst(c, 6, () => ({
       vel: new THREE.Vector3(dir.x * rand(2, 5), rand(1, 4), dir.z * rand(2, 5)), life: rand(0.8, 1.6), size: rand(0.05, 0.12), color: enemy.chunkColor, gravity: 16, linger: true, floor: enemy.pos.y,
     }));
@@ -389,7 +612,7 @@ class Game {
         this.hud.parryFlash();
         break;
       case 'blocked':
-        this.audio.play('block');
+        this.audio.play(this.player.offhand === 'shield' ? 'shield-block' : 'block');
         this.sparks(gp, 10, 0xffb060, 3);
         this.shake(0.2);
         break;
@@ -425,6 +648,13 @@ class Game {
     this.shake(0.2);
     const S = this.player.stats;
     if (S.lifesteal > 0) this.player.hp = Math.min(S.maxHp, this.player.hp + S.lifesteal * 2);
+    if (this.mode !== 'run' || fell) return;
+    // Loot: bosses always drop something good; heavier foes are likelier to.
+    const odds = enemy.isBoss ? 1 : enemy.mass >= 3 ? 0.45 : 0.12;
+    if (chance(odds)) {
+      const pos = enemy.pos.clone();
+      new WeaponDrop(this, this.room, rollWeapon(this.depth, enemy.isBoss ? 2 : 0), pos);
+    }
   }
 
   onPlayerDeath() {
@@ -432,6 +662,18 @@ class Game {
     this.audio.play('death');
     this.slowmo = 1.4;
     this.hud.hideBoss();
+    if (this.mode === 'hub') {
+      // Death in the sparring ground is only a lesson.
+      setTimeout(() => {
+        this.runTransition(() => {
+          this.hub.clearEnemies();
+          this.player.revive();
+          this.placePlayer(this.hub.spawnPose);
+          this.state = 'playing';
+        }, 0.6);
+      }, 1400);
+      return;
+    }
     setTimeout(() => {
       if (this.state !== 'dead') return;
       this.deathScreen.classList.remove('hidden');
@@ -451,16 +693,18 @@ class Game {
   }
 
   renderPauseStats() {
-    const S = this.player.stats;
+    const p = this.player;
+    const S = p.stats;
     const rows = [
-      ['Vigor', `${Math.ceil(this.player.hp)} / ${S.maxHp}`],
+      ['Class', p.classDef.name],
+      ['Vigor', `${Math.ceil(p.hp)} / ${S.maxHp}`],
       ['Endurance', `${S.maxStamina}`],
-      ['Strength', S.damage.toFixed(1)],
-      ['Swing speed', `${Math.round(S.attackSpeed * 100)}%`],
-      ['Parry window', `${Math.round(S.parryWindow * 1000)} ms`],
+      ...(S.maxMana ? [['Mana', `${Math.floor(p.mana)} / ${S.maxMana}`]] : []),
+      ['Weapon', p.weapon.displayName],
+      ['Damage', `×${S.damageMult.toFixed(2)}`],
+      ['Parry window', `${Math.round(p.parryWindow * 1000)} ms`],
       ['Riposte', `×${S.riposteMult.toFixed(1)}`],
-      ['Life drain', `${S.lifesteal}`],
-      ['Floor', toRoman(this.depth)],
+      ['Location', this.mode === 'hub' ? this.hub.name : `Floor ${toRoman(this.depth)}`],
     ];
     const grid = document.getElementById('pause-stats');
     grid.replaceChildren();
@@ -480,9 +724,9 @@ class Game {
     const input = this.input;
     if (input.wasPressed('KeyM')) this.audio.toggleMute();
     if (input.wasPressed('KeyR')) this.restart();
-    input.endFrame();
 
-    if (this.state === 'paused') {
+    if (this.state === 'paused' || this.state === 'menu') {
+      input.endFrame();
       this.render();
       return;
     }
@@ -506,6 +750,7 @@ class Game {
       this.player.update(dt);
       this.room.update(dt);
       if (!this.transition && this.player.alive) this.checkRoomExit();
+      this.updateInteraction();
     } else {
       this.player.updateCamera(dt, 0);
     }
@@ -516,8 +761,24 @@ class Game {
     this.glow.update(dt);
     this.updateAmbience(dt, realDt);
     this.audio.update(realDt);
-    if (this.state !== 'title') this.hud.update(realDt, this.player);
+    if (this.state !== 'title') this.hud.update(realDt, this.player, this.camera);
+    input.endFrame();
     this.render();
+  }
+
+  updateInteraction() {
+    const p = this.player;
+    const input = this.input;
+    if (!p.alive || this.transition) {
+      this.hud.setPrompt(null);
+      return;
+    }
+    this.focus = this.findFocus();
+    this.hud.setPrompt(this.focus);
+    if (input.wasPressed('KeyE') && this.focus && ['idle', 'guard', 'swap'].includes(p.state)) this.focus.interact();
+    if (input.wasPressed('KeyG') && ['idle', 'guard'].includes(p.state)) this.dropActiveWeapon();
+    if (input.wasPressed('Tab')) this.hud.toggleInventory(p);
+    this.hud.renderLoadoutIfChanged(p);
   }
 
   updateAmbience(dt, realDt) {
@@ -531,11 +792,14 @@ class Game {
     if (Math.random() < dt * 10) {
       this.glow.emit({
         pos: new THREE.Vector3(p.pos.x + rand(-7, 7), p.pos.y + rand(0.3, 4), p.pos.z + rand(-7, 7)),
-        vel: new THREE.Vector3(rand(-0.15, 0.15), rand(-0.05, 0.12), rand(-0.15, 0.15)), life: rand(2, 4), size: 0.03, color: 0x6a7090,
+        vel: new THREE.Vector3(rand(-0.15, 0.15), rand(-0.05, 0.12), rand(-0.15, 0.15)), life: rand(2, 4), size: 0.03,
+        color: this.mode === 'hub' ? 0x9a9480 : 0x6a7090,
       });
     }
-    this.crystalLights.forEach((l, i) => { l.intensity = (l.userData.base || 0) * (0.85 + 0.15 * Math.sin(t * 1.3 + i * 2)); });
-    this.warmLights.forEach((l, i) => { l.intensity = (l.userData.base || 0) * (0.8 + 0.2 * flicker(t, i * 5)); });
+    this.poolLights.forEach((l, i) => {
+      const base = l.userData.base || 0;
+      l.intensity = base * (l.userData.flicker ? 0.8 + 0.2 * flicker(t, i * 5) : 0.85 + 0.15 * Math.sin(t * 1.3 + i * 2));
+    });
     const ped = this.room.pedestal;
     if (ped && !ped.taken) {
       this.pedestalLight.position.copy(ped.lightPosition);
@@ -551,6 +815,12 @@ class Game {
       m.material.map.offset.x = this.camera.position.x / 100 + t * sx;
       m.material.map.offset.y = -this.camera.position.z / 100 + t * sz;
     }
+    if (this.sun.castShadow) {
+      // Keep the sun's shadow frustum centred near the knight.
+      const cx = Math.round(p.pos.x / 8) * 8, cz = Math.round(p.pos.z / 8) * 8;
+      this.sun.target.position.set(cx, 0, cz);
+      this.sun.position.set(cx - 75, 95, cz + 55);
+    }
     this.hurtFlash = Math.max(0, this.hurtFlash - realDt * 2.5);
     this.flash = Math.max(0, this.flash - realDt * 3);
   }
@@ -564,6 +834,11 @@ class Game {
     u.fade.value = this.fade;
     this.post.render(this.scene, this.camera, p.viewmodel.scene, p.viewmodel.camera);
   }
+}
+
+function pick3() {
+  const r = Math.random();
+  return r < 0.4 ? 0xffe0a0 : r < 0.8 ? 0xff9a40 : 0xffffff;
 }
 
 window.game = new Game();

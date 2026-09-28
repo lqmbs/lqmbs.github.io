@@ -56,15 +56,22 @@ export class GroundTelegraph {
   }
 }
 
-/** A crystal bolt. Parry it and it flies back at whoever cast it. */
+/**
+ * A magic bolt. Enemy bolts can be parried straight back at their caster; the knight's own
+ * spells (wand, staff) are bolts owned by the player.
+ */
 export class Bolt {
-  constructor(game, pos, dir, owner, color) {
+  constructor(game, pos, dir, owner, color, { damage = 14, speed = 12, burn = 0, pierce = false, size = 1 } = {}) {
     this.game = game;
     this.owner = owner;
     this.color = color;
-    this.vel = dir.clone().multiplyScalar(12);
+    this.damage = damage;
+    this.burn = burn;
+    this.pierce = pierce;
+    this.hit = new Set();
+    this.vel = dir.clone().multiplyScalar(speed);
     this.life = 4;
-    this.mesh = new THREE.Mesh(new THREE.OctahedronGeometry(0.16), new THREE.MeshBasicMaterial({ color, fog: false }));
+    this.mesh = new THREE.Mesh(new THREE.OctahedronGeometry(0.16 * size), new THREE.MeshBasicMaterial({ color, fog: false }));
     this.mesh.scale.set(0.7, 0.7, 1.8);
     this.mesh.position.copy(pos);
     this.mesh.lookAt(pos.clone().add(dir));
@@ -90,7 +97,7 @@ export class Bolt {
       const eye = player.eyePosition;
       eye.y -= 0.35;
       if (p.distanceTo(eye) < 0.65) {
-        const result = player.receiveAttack(this.owner, { damage: 14 * this.owner.damageMult, from: p });
+        const result = player.receiveAttack(this.owner, { damage: this.damage, from: p });
         this.game.onBoltResolved(this, result);
         if (result === 'parried' && this.owner.alive) {
           const target = this.owner.pos.clone();
@@ -98,17 +105,24 @@ export class Bolt {
           this.vel = target.sub(p).normalize().multiplyScalar(20);
           this.mesh.lookAt(p.clone().add(this.vel));
           this.owner = player;
+          this.damage = 45;
           return true;
         }
-        return this.dispose(result !== 'miss');
+        if (result === 'miss') return true;
+        return this.dispose(true);
       }
     } else {
       for (const e of this.game.room.enemies) {
-        if (!e.active) continue;
+        if (!e.active || this.hit.has(e)) continue;
         if (Math.hypot(e.pos.x - p.x, e.pos.z - p.z) < e.radius + 0.35 && p.y > e.pos.y - 0.2 && p.y < e.pos.y + e.height + 0.2) {
-          e.takeRawDamage(45, this.vel.clone().setY(0).normalize(), 5);
-          this.game.onEnemyHit(e, e.alive ? 'hit' : 'kill', this.vel.clone().setY(0).normalize());
-          return this.dispose(true);
+          this.hit.add(e);
+          const dir = this.vel.clone().setY(0).normalize();
+          const dmg = this.damage * player.stats.damageMult;
+          e.takeRawDamage(dmg, dir, 3);
+          if (e.alive) e.addPosture(8);
+          if (e.alive && this.burn) e.ignite(3, this.burn);
+          this.game.onEnemyHit(e, e.alive ? 'spell' : 'kill', dir, dmg);
+          if (!this.pierce) return this.dispose(true);
         }
       }
     }
@@ -294,7 +308,7 @@ export class Enemy {
   }
 
   /** The knight's blade lands. Returns 'blocked' | 'hit' | 'riposte' | 'kill' | 'miss'. */
-  receiveHit(damage, dir, player) {
+  receiveHit(damage, dir, player, { posture = 6, burn = 0 } = {}) {
     if (!this.active) return 'miss';
     if (this.canBlock() && chance(this.blockChance)) {
       this.setState('block');
@@ -309,10 +323,33 @@ export class Enemy {
     if (this.dead) return 'kill';
     if (result === 'riposte') this.setState('recover');
     else {
-      this.addPosture(6);
+      this.addPosture(posture);
       if (this.state !== 'broken') this.onFlinch();
     }
+    if (burn && !this.dead) this.ignite(3, burn);
     return result;
+  }
+
+  /** Vigil Knight's shield bash: a heavy posture blow that shoves the target away. */
+  receiveBash(dir) {
+    if (!this.active) return;
+    this.takeRawDamage(8, dir, 9 / Math.max(1, this.mass * 0.5));
+    if (this.dead) return;
+    if (!this.addPosture(55) && !this.isBoss) this.stun(1.1);
+  }
+
+  /** Blinded or bashed: drop everything and reel. Bosses shrug it off into posture instead. */
+  stun(duration) {
+    if (!this.active) return;
+    if (this.isBoss) { this.addPosture(30); return; }
+    if (this.state === 'broken') return;
+    this.setState('stagger');
+    this.staggerTime = duration;
+  }
+
+  ignite(duration, dps) {
+    this.burnTime = Math.max(this.burnTime || 0, duration);
+    this.burnDps = Math.max(this.burnDps || 0, dps);
   }
 
   takeRawDamage(amount, dir, knock) {
@@ -378,6 +415,19 @@ export class Enemy {
       return;
     }
 
+    if (this.burnTime > 0) {
+      this.burnTime -= dt;
+      this.takeRawDamage(this.burnDps * dt, _v.set(0, 0, 0), 0);
+      this.flash = 0;
+      if (Math.random() < dt * 30) {
+        this.game.glow.emit({
+          pos: new THREE.Vector3(this.pos.x + rand(-0.4, 0.4), this.pos.y + rand(0.2, this.height), this.pos.z + rand(-0.4, 0.4)),
+          vel: new THREE.Vector3(rand(-0.3, 0.3), rand(1, 2.5), rand(-0.3, 0.3)), life: rand(0.3, 0.6), size: rand(0.05, 0.1), color: 0xff6a20,
+        });
+      }
+      if (this.dead) return;
+    }
+
     if (!this.updateCommonStates(dt)) {
       if (this.player.alive) this.think(dt);
       else this.brake(dt, 4);
@@ -430,7 +480,10 @@ export class Enemy {
         return true;
       case 'stagger':
         this.brake(dt, 6);
-        if (this.stateTime > 1.0) this.setState('chase');
+        if (this.stateTime > (this.staggerTime ?? 1.0)) {
+          this.staggerTime = null;
+          this.setState('chase');
+        }
         return true;
       case 'broken':
         this.brake(dt, 5);
@@ -810,7 +863,7 @@ export class Acolyte extends Enemy {
           const target = this.player.eyePosition;
           target.y -= 0.35;
           target.addScaledVector(this.player.vel.clone().setY(0), 0.25);
-          this.game.addBolt(new Bolt(this.game, from, target.sub(from).normalize(), this, this.game.theme.crystal));
+          this.game.addBolt(new Bolt(this.game, from, target.sub(from).normalize(), this, this.game.theme.crystal, { damage: 14 * this.damageMult }));
           this.game.audio.play('bolt');
           this.setState('recover');
         }
@@ -1160,3 +1213,96 @@ export function pickEnemyType(depth) {
   return Skeleton;
 }
 
+
+// ============================================================================
+// Training dummy — never fights back, never dies, resets when left alone.
+// ============================================================================
+
+export class TrainingDummy extends Enemy {
+  constructor(game, area, x, y, z, yaw = 0) {
+    super(game, area, x, y, z, { name: 'Training Dummy', hp: 400, radius: 0.45, height: 1.9, mass: 60, postureMax: 60, parryPosture: 0, chunkColor: 0x8a6a3a, brokenTime: 2.5 });
+    const wood = this.mat(0x4a3424);
+    const straw = this.mat(0x9a8248);
+    const cloth = this.mat(0x5a2a24);
+    this.body = new THREE.Group();
+    this.body.add(box(0.14, 1.9, 0.14, wood, 0, 0.95, 0));
+    const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.24, 0.8, 7), straw);
+    torso.position.y = 1.25;
+    torso.castShadow = true;
+    this.body.add(torso);
+    this.body.add(box(1.1, 0.1, 0.1, wood, 0, 1.5, 0));
+    const head = new THREE.Mesh(new THREE.IcosahedronGeometry(0.2, 0), straw);
+    head.position.y = 1.85;
+    head.castShadow = true;
+    this.body.add(head);
+    this.body.add(box(0.62, 0.5, 0.06, cloth, 0, 1.2, 0.26));
+    for (const side of [-1, 1]) this.body.add(box(0.08, 0.3, 0.08, straw, side * 0.5, 1.38, 0));
+    this.rig.add(this.body);
+    this.yaw = yaw;
+    this.sinceHit = 10;
+    this.wobble = 0;
+    this.rig.position.y = 0;
+    this.setState('idle');
+  }
+
+  canBlock() { return false; }
+  onParried() {}
+
+  takeRawDamage(amount, dir, knock) {
+    this.sinceHit = 0;
+    this.wobble = 1;
+    super.takeRawDamage(amount, dir, 0);
+    void knock;
+  }
+
+  die() {
+    this.hp = this.maxHp;
+    this.game.audio.play('shatter');
+    this.game.particles.burst(this.pos.clone().setY(this.pos.y + 1.3), 16, () => ({
+      vel: new THREE.Vector3(rand(-3, 3), rand(1, 4), rand(-3, 3)), life: rand(1, 2), size: rand(0.04, 0.1), color: 0x9a8248, gravity: 14, linger: true, floor: this.pos.y,
+    }));
+  }
+
+  think(dt) {
+    this.brake(dt, 30);
+    this.sinceHit += dt;
+    if (this.sinceHit > 3 && this.state === 'idle') {
+      this.hp = this.maxHp;
+      this.posture = 0;
+    }
+    if (this.state !== 'idle' && this.state !== 'stagger' && this.state !== 'broken') this.setState('idle');
+  }
+
+  animate(dt) {
+    this.wobble = Math.max(0, this.wobble - dt * 2.5);
+    this.body.rotation.z = Math.sin(this.game.time * 22) * 0.18 * this.wobble;
+    this.body.rotation.x = this.state === 'broken' || this.state === 'stagger' ? -0.3 : 0;
+  }
+}
+
+/** Push overlapping enemies apart, heavier ones moving less. */
+export function separateEnemies(list) {
+  for (let i = 0; i < list.length; i++) {
+    const a = list[i];
+    if (!a.active) continue;
+    for (let j = i + 1; j < list.length; j++) {
+      const b = list[j];
+      if (!b.active || Math.abs(a.pos.y - b.pos.y) > 1.5) continue;
+      const dx = b.pos.x - a.pos.x, dz = b.pos.z - a.pos.z;
+      const d = Math.hypot(dx, dz), min = a.radius + b.radius;
+      if (d >= min || d < 1e-4) continue;
+      const push = (min - d) / d;
+      const wa = b.mass / (a.mass + b.mass), wb = 1 - wa;
+      a.pos.x -= dx * push * wa; a.pos.z -= dz * push * wa;
+      b.pos.x += dx * push * wb; b.pos.z += dz * push * wb;
+    }
+  }
+}
+
+export const ENEMY_TYPES = {
+  hollow: { name: 'Hollow', create: (g, a, x, y, z) => new Skeleton(g, a, x, y, z) },
+  shade: { name: 'Shade', create: (g, a, x, y, z) => new Shade(g, a, x, y, z) },
+  acolyte: { name: 'Lumen Acolyte', create: (g, a, x, y, z) => new Acolyte(g, a, x, y, z) },
+  knight: { name: 'Geode Knight', create: (g, a, x, y, z) => new Brute(g, a, x, y, z) },
+  warden: { name: 'Guardian', create: (g, a, x, y, z) => new Warden(g, a, x, y, z, 'Sparring Guardian') },
+};
