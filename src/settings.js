@@ -3,7 +3,7 @@
  * blocked (private windows, file://), and the game must still run on the defaults.
  */
 const KEY = 'ashen-descent.settings';
-const DEFAULTS = { sensitivity: 1, invertY: false, fov: 72, smoothing: true };
+const DEFAULTS = { sensitivity: 1, invertY: false, fov: 72, smoothing: true, quality: 'medium' };
 
 export class Settings {
   constructor() {
@@ -65,6 +65,20 @@ export class Settings {
       input.addEventListener('change', () => this.set(k, input.checked));
       return input;
     };
+    const choice = (k, options) => {
+      const input = document.createElement('select');
+      input.className = 'set-select';
+      for (const [v, label] of options) {
+        const o = document.createElement('option');
+        o.value = v;
+        o.textContent = label;
+        input.append(o);
+      }
+      input.value = this.values[k];
+      input.addEventListener('change', () => this.set(k, input.value));
+      return input;
+    };
+    row('Graphics quality', choice('quality', [['low', 'Low — fastest'], ['medium', 'Medium'], ['high', 'High — sharpest']]));
     row('Camera sensitivity', ...slider('sensitivity', 0.1, 3, 0.05, (v) => `${v.toFixed(2)}×`));
     row('Field of view', ...slider('fov', 60, 100, 1, (v) => `${v}°`));
     row('Invert look', toggle('invertY'));

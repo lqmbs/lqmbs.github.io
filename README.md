@@ -49,7 +49,40 @@ Every run starts in the hub: a ruined cruciform hold on a misty island, under an
 - **The armory corridor** runs east to the **sparring grounds**, a ring with a tent, a campfire, three training dummies, a weapon rack holding every weapon type, and a **Summoning Effigy** that calls any enemy (or the guardian) into the ring.
 - **The roofless courtyard** runs south, overgrown and ruined, out to a meadow, a grey beach, and a sea dotted with stacks and a drowned keep.
 
+- **The Ashen Shrine** is a brazier by the south door of the Round Table. See *Ashes, boons and oaths* below.
+
 Dying in the sparring ground just sends you back to the table. On an expedition, death ends the run and returns you to the Hold.
+
+## Ashes, boons and oaths
+
+Every expedition, won or lost, leaves **ashes**:
+
+- 12 per floor cleared
+- 30 per guardian
+- 8 per champion
+- 1 per kill
+- 60 for completing the expedition
+
+They are counted on the death screen (or when you return victorious) and kept between sessions. Spend them at the **Ashen Shrine** on lasting boons:
+
+| Boon | Levels |
+| --- | --- |
+| Tempered Vigor | +10 max health each (3) |
+| Iron Lungs | +10 max stamina each (2) |
+| Deeper Flask | +1 Crimson Flask each (2) |
+| Quickened Guard | +15 ms parry window each (2) |
+| Pilgrim's Purse | Start each expedition with 15 coin each (2) |
+| Gaoler's Keyring | Start each expedition with an iron key (1) |
+| Ashen Boon | Start each expedition with a random relic (1) |
+
+**Oaths** are sworn at the shrine for the next descent. Each makes the run harder and its ashes richer, and they stack:
+
+| Oath | Effect | Ashes |
+| --- | --- | --- |
+| Frailty | −30% max health | +40% |
+| Wrath | Foes hit 25% harder | +35% |
+| the Hunt | Foes move 20% faster | +30% |
+| Thirst | Flasks don't refill between floors | +30% |
 
 ## Classes
 
@@ -184,7 +217,35 @@ Alongside the stat relics, many change how you fight:
 | Ember Hound | Fast pack hunter that circles and pounces, sometimes biting twice. |
 | Drowned | Bloated giant with a crushing slam and a perilous grab. |
 | Gargoyle | Hovers, rises with a screech, then dives. |
-| Guardian | Floor boss with three-hit combos, a wide sweep, and a perilous ground slam that marks its landing zone. |
+| Arbalist | Skeletal crossbowman. Backs away if you close in and fires fast parryable bolts. Every third shot is a red-glowing piercing bolt that can't be parried: sidestep it. |
+| Flagellant | Frenzied penitent with a chain flail. Four-hit combos test your parry rhythm, and it gets faster once badly hurt. |
+
+**Pack tactics.** Only the nearest two melee foes (three from floor III) press the attack at once. The rest circle at the edge of reach, waiting for an opening, then step in as the front rank falls.
+
+**Champions.** Elite arenas hold a champion with one affix per floor depth (up to three). From floor II a champion sometimes walks among ordinary foes. Affixes:
+
+| Affix | Effect |
+| --- | --- |
+| Burning | Leaves burning ground behind it |
+| Vampiric | Heals 10% on every blow that lands |
+| Warded | A shield takes 70% of damage until its posture breaks |
+| Volatile | Bursts a moment after death (marked, perilous) |
+| Splitting | Splits into two lesser copies when killed |
+| Frenzied | Faster and harder-hitting below half health |
+| Hasted | Moves 35% faster |
+
+### Guardians
+
+Every biome has its own guardian. At half health each one roars, throws you back, gets faster, and unlocks new attacks (and sometimes adds). A posture-broken guardian can be executed.
+
+| Guardian | Phase one | Phase two |
+| --- | --- | --- |
+| **The Gaoler of Bones** (Sapphire Undercroft) | Cleaver combos, a wide sweep, a perilous slam, and a **chain** flung down a marked lane. Parry it, or be dragged in for a hammer blow | *Unchained*: bone spears erupt under you in sequence; rings of spears run across the floor (jump them); two Hollows rise |
+| **The Sunken Abbess** (Drowned Cathedral) | Drifts at mid range: fans of water bolts to parry back, a perilous **bell toll** around her, and **tides** that run outwards (jump them) | *Risen Tide*: bigger volleys, double tides, and she slips through the water to strike from beside you |
+| **The Kiln Tyrant** (Ember Fortress) | Hammer combos, slams that leave the floor **burning**, a **charge** down a marked lane, and a stomp that sends fire rolling outwards | *Molten Heart*: molten stone rains on where you stand and where you run; its charge leaves fire behind |
+| **The Last Seneschal** (Sunlit Ruins) | Quick and exact: 4-hit glaive **flurries** to parry, a spinning sweep, a perilous thrust, and **leaps** across the arena | *The Sun's Echo*: a shining double repeats every flurry a heartbeat later, landings send out rings of light, and sun-rings roll across the floor |
+
+A **ring on the floor** is low: jump it or dodge through it. A **marked lane** means get out of it.
 
 ## Expeditions
 
@@ -241,7 +302,21 @@ Balustrades grow automatically along every open edge, except in the flood, where
 - Post pass: bloom on bright light, ACES tone mapping, a split-tone grade (cold shadows, warm highlights), Bayer dithering, posterisation, film grain and a vignette.
 - Heavy blue `FogExp2` whose tint changes per floor.
 - The hand lantern is the only shadow-casting light. A fixed pool of crystal and fire lights is re-aimed at each chamber's props, so shaders never recompile.
-- All sound is synthesised live with WebAudio, including the metallic parry clang and a cavern reverb. There are no audio files.
+- **Weather** differs per place:
+  - The Hold: drizzle.
+  - The Drowned Cathedral: rain, with lightning and thunder.
+  - The Ember Fortress: ash and rising embers.
+  - The Sapphire Undercroft: glittering crystal snow.
+  - The Sunlit Ruins: dust motes and slanting shafts of light.
+  - The devil's realm: ash. The angel's realm: dust motes.
+- **Combat music** swells over the cavern drone when a chamber seals: war drums and a dissonant string pad. Guardians bring faster drums and a choir. Everything fades back to the drone when the fight ends.
+- **Graphics quality** (Low / Medium / High, in the pause menu) sets:
+  - Render resolution: 1/4, 1/3 or 1/2.
+  - Bloom taps.
+  - Lantern shadows: off, 512 or 1024.
+  - Weather density.
+  - How many blood stains stay on the floor.
+- All sound is synthesised live with WebAudio, including the metallic parry clang, a cavern reverb, the drums and the thunder. There are no audio files.
 
 ## Code
 
@@ -255,13 +330,17 @@ src/physics.js    World: walkable surfaces (rect/ramp/disc/ring/terrain), obstac
 src/architecture.js  Builder: platforms, bridges, stairs, pillars, arcades, crystals, towers, parapets, vista
 src/floor.js      Seamless floor: looping, tiered, stacked generation; stair and lift passages; shortcuts; the citadel; vista, abyss, visibility
 src/gore.js       Pooled blood stains on the ground
+src/bosses.js     The four biome guardians: scripted attack steps, two phases, their effects
+src/weather.js    Rain, ash, crystal snow, motes, light shafts and lightning around the camera
+src/meta.js       Persistent profile: ashes, boons, oaths
+src/hazards.js    Ring waves, fire pools, lane telegraphs and ghost echoes
 src/lifts.js      Lifts (shared moving surfaces with landing fences) and one-sided shortcut gates
 src/ladders.js    Reachability analysis that finds inescapable pits, and the climbable ladders placed in them
 src/chamber.js    A chamber of a floor: gateways, fog walls, decoration, dormant encounters
 src/layouts.js    Chamber archetypes (gothic, imperial and titan-hewn) plus shrine, reliquary, bazaar and arena
 src/sky.js        Painterly sky dome
 src/player.js     First-person controller, loadout, guard/parry/block, attacks, spells, skills, flasks, viewmodel
-src/enemies.js    Enemy base (posture, blocking, telegraphs, stun, burn), Hollow, Shade, Acolyte, Geode Knight, Warden, Training Dummy, Bolt
+src/enemies.js    Enemy base (posture, blocking, telegraphs, stun, burn, attack tokens, champion affixes), Hollow, Shade, Acolyte, Geode Knight, Arbalist, Flagellant, Warden, Training Dummy, Bolt
 src/items.js      Relics (stat and build-changing; common, shop, devil and angel pools), pedestals, the descent well
 src/builds.js     BuildFX: relic procs (lightning, parry bursts, orbiting knives, halo, corpse bloom, brimstone), Sunfall, shockwaves
 src/pickups.js    Coins, keys, blood vials, wooden and gilded chests

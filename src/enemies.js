@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { rand, chance, clamp, damp, dampAngle, angleDiff, headingTo, easeOut, TAU } from './util.js';
+import { rand, chance, clamp, damp, dampAngle, angleDiff, headingTo, easeOut, TAU, shuffle } from './util.js';
+import { FirePool } from './hazards.js';
 
 const _v = new THREE.Vector3();
 
@@ -7,7 +8,7 @@ const _v = new THREE.Vector3();
 // Shared bits
 // ============================================================================
 
-function box(w, h, d, mat, x, y, z) {
+export function box(w, h, d, mat, x, y, z) {
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
   m.position.set(x, y, z);
   m.castShadow = true;
@@ -61,8 +62,9 @@ export class GroundTelegraph {
  * spells (wand, staff) are bolts owned by the player.
  */
 export class Bolt {
-  constructor(game, pos, dir, owner, color, { damage = 14, speed = 12, burn = 0, pierce = false, size = 1, homing = 0, shape = 'bolt', life = 4, spell = true, onHit = null } = {}) {
+  constructor(game, pos, dir, owner, color, { damage = 14, speed = 12, burn = 0, pierce = false, size = 1, homing = 0, shape = 'bolt', life = 4, spell = true, onHit = null, perilous = false } = {}) {
     this.game = game;
+    this.perilous = perilous;
     this.owner = owner;
     this.onHit = onHit;
     this.color = color;
@@ -120,7 +122,7 @@ export class Bolt {
       const eye = player.eyePosition;
       eye.y -= 0.35;
       if (p.distanceTo(eye) < 0.65) {
-        const result = player.receiveAttack(this.owner, { damage: this.damage, from: p });
+        const result = player.receiveAttack(this.owner, { damage: this.damage, from: p, perilous: this.perilous });
         this.game.onBoltResolved(this, result);
         if (result === 'parried' && this.owner.alive) {
           const target = this.owner.pos.clone();
@@ -243,10 +245,15 @@ export class Enemy {
     this.wakeDelay = delay;
   }
 
-  /** A champion: bigger, tougher, gilded — it gets the boss bar. */
-  makeElite() {
+  /**
+   * A champion: bigger, tougher, and marked by one or more affixes that change how it fights.
+   * In an elite arena it gets the boss bar; a champion met by chance keeps its own.
+   */
+  makeElite({ affixes = 1, bar = true } = {}) {
     this.elite = true;
-    this.name = `${this.name} Champion`;
+    this.affixes = shuffle(Object.keys(AFFIXES)).slice(0, affixes);
+    this.name = `${this.affixes.map((a) => AFFIXES[a].name).join(' ')} ${this.name}`;
+    this.auraColor = AFFIXES[this.affixes[0]].color;
     this.maxHp *= 2.4;
     this.hp = this.maxHp;
     this.postureMax *= 1.7;
@@ -254,8 +261,20 @@ export class Enemy {
     this.rig.scale.multiplyScalar(1.2);
     this.height *= 1.2;
     this.radius *= 1.15;
-    this.hudBar = true;
+    this.hudBar = bar;
+    if (this.has('hasted') && this.speed) this.speed *= 1.35;
+    if (this.has('warded')) {
+      this.ward = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 10), new THREE.MeshBasicMaterial({
+        color: 0x9ab8ff, transparent: true, opacity: 0.16, blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+      }));
+      this.ward.scale.set(this.radius * 1.6, this.height * 0.65, this.radius * 1.6);
+      this.ward.position.y = this.height * 0.5;
+      this.group.add(this.ward);
+    }
+    this.trailTimer = 0;
   }
+
+  has(affix) { return !!this.affixes?.includes(affix); }
 
   buildOverlay() {
     const g = this.game;
@@ -313,6 +332,17 @@ export class Enemy {
     const p = this.player.pos;
     const dx = p.x - this.pos.x, dz = p.z - this.pos.z;
     const d = Math.hypot(dx, dz) || 1;
+    if (this.token === false && d < 4.8) {
+      // Waiting its turn: circle at the edge of reach while others press the attack.
+      const dir = this.orbitDir || (this.orbitDir = chance(0.5) ? 1 : -1);
+      const radial = clamp((d - 4.3) * 1.5, -1, 1);
+      const tx = (-dz / d) * dir * 0.8 + (dx / d) * radial, tz = (dx / d) * dir * 0.8 + (dz / d) * radial;
+      const len = Math.hypot(tx, tz) || 1;
+      this.steer(tx / len, tz / len, speed * 0.5, dt, 5);
+      this.yaw = dampAngle(this.yaw, Math.atan2(dx, dz), 9, dt);
+      if (chance(dt * 0.25)) this.orbitDir *= -1;
+      return;
+    }
     const s = d > stopAt ? speed : 0;
     this.steer(dx / d, dz / d, s, dt);
     this.yaw = dampAngle(this.yaw, Math.atan2(dx, dz), 9, dt);
@@ -346,6 +376,10 @@ export class Enemy {
     }
     const result = p.receiveAttack(this, { damage: damage * this.damageMult, perilous, from: from || this.pos });
     this.game.onEnemyAttackResolved(this, result);
+    if (result === 'hit' && this.has('vampiric') && !this.dead) {
+      this.hp = Math.min(this.maxHp, this.hp + this.maxHp * 0.1);
+      this.game.glow.burst(this.pos.clone().setY(this.pos.y + this.height * 0.6), 16, () => ({ vel: new THREE.Vector3(rand(-1, 1), rand(0.5, 2), rand(-1, 1)), life: rand(0.4, 0.8), size: 0.06, color: 0xc41e2a, drag: 2 }));
+    }
     if (result === 'parried') this.onParried();
     return result;
   }
@@ -360,6 +394,15 @@ export class Enemy {
     this.postureCooldown = 1.5;
     if (this.posture >= this.postureMax) {
       this.posture = 0;
+      if (this.ward) {
+        // The ward shatters with the guard behind it.
+        this.group.remove(this.ward);
+        this.ward.geometry.dispose();
+        this.ward.material.dispose();
+        this.ward = null;
+        this.game.audio.play('shatter');
+        this.game.glow.burst(this.pos.clone().setY(this.pos.y + this.height * 0.5), 40, () => ({ vel: new THREE.Vector3(rand(-4, 4), rand(-1, 4), rand(-4, 4)), life: rand(0.3, 0.7), size: 0.06, color: 0x9ab8ff, drag: 3 }));
+      }
       this.setState('broken');
       this.game.onPostureBroken(this);
       return true;
@@ -441,8 +484,17 @@ export class Enemy {
 
   takeRawDamage(amount, dir, knock) {
     if (this.dead) return;
+    if (this.ward) amount *= 0.3;
     this.hp -= amount;
     this.flash = 0.09;
+    // Frenzied champions go berserk when badly hurt.
+    if (this.has('frenzied') && !this.frenzy && this.hp < this.maxHp * 0.5 && this.hp > 0) {
+      this.frenzy = true;
+      if (this.speed) this.speed *= 1.5;
+      this.damageMult *= 1.2;
+      this.auraColor = 0xff2010;
+      this.game.audio.play('shriek');
+    }
     // Reel from the blow: the whole body rocks away from it (heavier foes barely sway).
     if (amount > 0.5 && dir.lengthSq() > 0) {
       this.hitReact = Math.min(1.2, this.hitReact + 0.45 + knock * 0.06);
@@ -476,6 +528,19 @@ export class Enemy {
     if (this.game.hud.boss === this) this.game.hud.hideBoss();
     this.game.onEnemyKilled(this, fell);
     this.removed = true;
+    if (!fell && this.has('volatile')) this.game.addEffect(new VolatileBlast(this.game, this));
+    if (!fell && this.has('splitting')) {
+      for (const side of [-1, 1]) {
+        const x = this.pos.x + side * 0.9, z = this.pos.z + rand(-0.5, 0.5);
+        const e = new this.constructor(this.game, this.chamber, x, this.pos.y, z);
+        e.maxHp = e.hp = e.maxHp * 0.45;
+        e.rig.scale.multiplyScalar(0.75);
+        e.height *= 0.75;
+        e.radius *= 0.8;
+        e.name = `Lesser ${e.name}`;
+        this.chamber.enemies.push(e);
+      }
+    }
   }
 
   // ---- Frame ---------------------------------------------------------------
@@ -562,9 +627,15 @@ export class Enemy {
     if (this.elite && Math.random() < dt * 14) {
       this.game.glow.emit({
         pos: new THREE.Vector3(this.pos.x + rand(-0.6, 0.6), this.pos.y + rand(0.2, this.height), this.pos.z + rand(-0.6, 0.6)),
-        vel: new THREE.Vector3(0, rand(0.4, 1.2), 0), life: rand(0.6, 1.2), size: 0.05, color: 0xffc050,
+        vel: new THREE.Vector3(0, rand(0.4, 1.2), 0), life: rand(0.6, 1.2), size: 0.05, color: this.auraColor ?? 0xffc050,
       });
+      // Burning champions leave the floor alight behind them.
+      if (this.has('burning') && (this.trailTimer -= dt) <= 0 && Math.hypot(this.vel.x, this.vel.z) > 1) {
+        this.trailTimer = 0.8;
+        this.game.addEffect(new FirePool(this.game, this.pos, 1.1, { duration: 3.5, dps: 7 }));
+      }
     }
+    if (this.ward) this.ward.material.opacity = 0.12 + 0.06 * Math.sin(this.game.time * 4);
 
     if (!this.updateCommonStates(dt)) {
       if (this.player.alive) this.think(dt);
@@ -602,7 +673,7 @@ export class Enemy {
     }
     this.glint = Math.max(0, this.glint - dt);
     for (const m of this.weaponMaterials) {
-      if (this.perilous && this.state === 'windup') m.emissive.setRGB(2.5, 0.15, 0.05);
+      if (this.perilous && (this.state === 'windup' || this.state === 'act')) m.emissive.setRGB(2.5, 0.15, 0.05);
       else if (this.glint > 0) m.emissive.setRGB(3 * this.glint / 0.22, 2.6 * this.glint / 0.22, 2 * this.glint / 0.22);
       else m.emissive.setRGB(0, 0, 0);
     }
@@ -700,7 +771,7 @@ export class Enemy {
 // Hollow — sword skeleton
 // ============================================================================
 
-function buildSkeletonRig(mats, { scale = 1, weapon = 'blade' } = {}) {
+export function buildSkeletonRig(mats, { scale = 1, weapon = 'blade' } = {}) {
   const { bone, weaponMat, eye, socket } = mats;
   const root = new THREE.Group();
   root.scale.setScalar(scale);
@@ -1383,6 +1454,8 @@ export function pickEnemyType(depth, biome = null) {
     [Skeleton, 5],
     [Shade, 2 + depth * 0.5],
     [Acolyte, 1.2 + depth * 0.5],
+    [Arbalist, 0.8 + depth * 0.6],
+    [Flagellant, 1 + depth * 0.6],
     [sig, sig === Brute ? (depth >= 2 ? depth * 0.8 : 0.5) : 2 + depth * 0.4],
   ];
   if (sig !== Brute && depth >= 2) table.push([Brute, 0.4]);
@@ -1488,6 +1561,301 @@ export function separateEnemies(list) {
   }
 }
 
+/** Champion affixes: each changes how the champion fights. */
+export const AFFIXES = {
+  burning: { name: 'Burning', color: 0xff6a20 },
+  vampiric: { name: 'Vampiric', color: 0xc41e2a },
+  warded: { name: 'Warded', color: 0x9ab8ff },
+  volatile: { name: 'Volatile', color: 0xffa040 },
+  splitting: { name: 'Splitting', color: 0xa0ff80 },
+  frenzied: { name: 'Frenzied', color: 0xff3020 },
+  hasted: { name: 'Hasted', color: 0xf0e0a0 },
+};
+
+/** A volatile champion's last act: a moment's warning, then it bursts. */
+class VolatileBlast {
+  constructor(game, e) {
+    this.game = game;
+    this.owner = e;
+    this.pos = e.pos.clone();
+    this.t = 0;
+    this.telegraph = new GroundTelegraph(game, this.pos.x, this.pos.y, this.pos.z, 3.2, 1.2, { color: 0xffa040 });
+    game.addEffect(this.telegraph);
+    game.audio.play('perilous');
+  }
+
+  update(dt) {
+    this.t += dt;
+    if (Math.random() < dt * 40) {
+      this.game.glow.emit({ pos: this.pos.clone().add(new THREE.Vector3(rand(-0.4, 0.4), rand(0.3, 1.5), rand(-0.4, 0.4))), vel: new THREE.Vector3(rand(-1, 1), rand(0, 2), rand(-1, 1)), life: 0.3, size: 0.07, color: 0xffa040 });
+    }
+    if (this.t < 1.2) return true;
+    const g = this.game, p = g.player;
+    if (Math.hypot(p.pos.x - this.pos.x, p.pos.z - this.pos.z) < 3.4 && Math.abs(p.pos.y - this.pos.y) < 1.6) {
+      const result = p.receiveAttack(this.owner, { damage: 24 * this.owner.damageMult, perilous: true, from: this.pos });
+      g.onEnemyAttackResolved(this.owner, result);
+    }
+    g.audio.play('boss-slam');
+    g.shake(0.5);
+    g.flash = Math.max(g.flash, 0.3);
+    g.glow.burst(this.pos.clone().setY(this.pos.y + 0.6), 50, () => ({ vel: new THREE.Vector3(rand(-7, 7), rand(1, 6), rand(-7, 7)), life: rand(0.3, 0.8), size: rand(0.06, 0.12), color: chance(0.5) ? 0xffa040 : 0xffe0a0, drag: 2.5 }));
+    return false;
+  }
+
+  dispose() {}
+}
+
+// ============================================================================
+// Arbalist — a skeletal crossbowman that keeps its distance
+// ============================================================================
+
+export class Arbalist extends Enemy {
+  constructor(game, chamber, x, y, z) {
+    const biome = chamber.floor?.biome;
+    super(game, chamber, x, y, z, { name: `${biome?.prefix ?? ''} Arbalist`.trim(), hp: 30, radius: 0.45, height: 1.9, postureMax: 35, parryPosture: 40, chunkColor: biome?.bone });
+    this.ranged = true;
+    this.eyeColor = biome?.eyes ?? 0xff2a10;
+    this.eyeMat = new THREE.MeshBasicMaterial({ color: this.eyeColor, fog: false });
+    this.parts = buildSkeletonRig({
+      bone: this.mat(biome?.bone ?? 0xc9bfa6),
+      weaponMat: this.weaponMat(0x5a5048),
+      socket: new THREE.MeshBasicMaterial({ color: 0x050303 }),
+      eye: this.eyeMat,
+    }, { weapon: 'none' });
+    const wood = this.mat(0x3a2a1a);
+    const iron = this.weaponMat(0x4a4a50);
+    const cloth = this.mat(0x2a2420);
+    const r = this.parts.root;
+    // A tattered hood and a quiver of bolts.
+    const hood = new THREE.Mesh(new THREE.ConeGeometry(0.26, 0.5, 6), cloth);
+    hood.position.set(0, 0.2, -0.02);
+    this.parts.head.add(hood);
+    r.add(box(0.12, 0.5, 0.12, wood, 0.12, 1.3, -0.2));
+    for (let i = 0; i < 3; i++) r.add(box(0.02, 0.2, 0.02, iron, 0.09 + i * 0.03, 1.62, -0.2));
+    // The crossbow, held in the weapon arm.
+    const bow = (this.bow = new THREE.Group());
+    bow.position.set(0, -0.7, 0.25);
+    bow.add(box(0.08, 0.08, 0.7, wood, 0, 0, 0));
+    bow.add(box(0.7, 0.05, 0.05, iron, 0, 0.02, 0.3));
+    this.boltMesh = box(0.03, 0.03, 0.4, iron, 0, 0.06, 0.2);
+    bow.add(this.boltMesh);
+    this.parts.arms[0].add(bow);
+    this.rig.add(r);
+    this.speed = 3 * this.speedMult;
+    this.shotTimer = rand(1.2, 2.4);
+    this.shots = 0;
+    this.strafeDir = chance(0.5) ? 1 : -1;
+    this.walk = 0;
+  }
+
+  onFlinch() { this.setState('flinch'); }
+
+  think(dt) {
+    const d = this.distToPlayer();
+    switch (this.state) {
+      case 'chase': {
+        this.shotTimer -= dt;
+        const p = this.player.pos;
+        if (d < 5.5) {
+          // Too close: back away, still facing the knight.
+          const dx = this.pos.x - p.x, dz = this.pos.z - p.z;
+          this.steer(dx / (d || 1), dz / (d || 1), this.speed, dt, 6);
+          this.facePlayer(dt, 8);
+        } else if (d > 13) this.chase(dt, this.speed);
+        else {
+          this.strafe(dt, 1.6, this.strafeDir);
+          if (chance(dt * 0.5)) this.strafeDir *= -1;
+        }
+        if (this.shotTimer <= 0 && d < 20) {
+          // Every third shot is a heavy piercing bolt: no parrying that.
+          this.heavy = ++this.shots % 3 === 0;
+          this.beginWindup(this.heavy ? 1.3 : 0.9, { perilous: this.heavy });
+          this.game.audio.play('crank');
+        }
+        break;
+      }
+      case 'windup':
+        this.brake(dt, 8);
+        this.facePlayer(dt, 10);
+        if (this.stateTime >= this.windupTime) {
+          const from = this.boltMesh.getWorldPosition(new THREE.Vector3());
+          const target = this.player.eyePosition;
+          target.y -= 0.3;
+          if (!this.heavy) target.addScaledVector(this.player.vel.clone().setY(0), 0.18);
+          const dir = target.sub(from).normalize();
+          this.game.addBolt(new Bolt(this.game, from, dir, this, this.heavy ? 0xff3020 : 0xe8d8b0, {
+            damage: (this.heavy ? 22 : 12) * this.damageMult, speed: this.heavy ? 30 : 24, perilous: this.heavy, size: this.heavy ? 1.3 : 0.9,
+          }));
+          this.game.audio.play('crossbow');
+          this.setState('recover');
+        }
+        break;
+      case 'recover':
+        this.brake(dt, 6);
+        if (this.stateTime > 0.7) {
+          this.shotTimer = rand(2.2, 3.4);
+          this.setState('chase');
+        }
+        break;
+    }
+  }
+
+  animate(dt) {
+    const P = this.parts;
+    const speedN = Math.min(1, Math.hypot(this.vel.x, this.vel.z) / 3);
+    this.walk += dt * 9 * speedN;
+    const s = Math.sin(this.walk) * 0.6 * speedN;
+    P.legs[0].rotation.x = s;
+    P.legs[1].rotation.x = -s;
+    const aiming = this.state === 'windup';
+    const armX = aiming ? -1.55 : this.state === 'stagger' || this.state === 'broken' ? 0.4 : -0.9;
+    P.arms[0].rotation.x = damp(P.arms[0].rotation.x, armX, 12, dt);
+    P.arms[1].rotation.x = damp(P.arms[1].rotation.x, aiming ? -1.4 : -0.5, 12, dt);
+    P.arms[1].rotation.z = damp(P.arms[1].rotation.z, aiming ? -0.5 : 0, 12, dt);
+    this.bow.rotation.x = damp(this.bow.rotation.x, aiming ? 1.55 : 0.9, 12, dt);
+    this.boltMesh.visible = this.state !== 'recover';
+    P.root.rotation.x = damp(P.root.rotation.x, this.state === 'stagger' || this.state === 'broken' ? -0.4 : 0, 12, dt);
+    this.eyeMat.color.setHex(aiming ? (this.heavy ? 0xff3020 : 0xffe0a0) : this.eyeColor);
+  }
+}
+
+// ============================================================================
+// Flagellant — a frenzied penitent with a chain flail; long, quick combos
+// ============================================================================
+
+export class Flagellant extends Enemy {
+  constructor(game, chamber, x, y, z) {
+    super(game, chamber, x, y, z, { name: 'Flagellant', hp: 32, radius: 0.42, height: 1.85, mass: 0.8, postureMax: 38, parryPosture: 34, chunkColor: 0x6a5040, bloodColor: 0x5a0508 });
+    const flesh = this.mat(0x8a7060);
+    const sack = this.mat(0x4a3e2c);
+    const rope = this.mat(0x6a5a3a);
+    const iron = this.weaponMat(0x3a3a3e);
+    const r = (this.root = new THREE.Group());
+    this.legs = [];
+    for (const side of [-1, 1]) {
+      const leg = new THREE.Group();
+      leg.position.set(side * 0.13, 0.8, 0);
+      leg.add(box(0.11, 0.8, 0.12, flesh, 0, -0.4, 0));
+      r.add(leg);
+      this.legs.push(leg);
+    }
+    // A ragged loincloth, a gaunt torso scored with welts, a sackcloth hood.
+    r.add(box(0.4, 0.3, 0.26, sack, 0, 0.82, 0));
+    r.add(box(0.36, 0.6, 0.2, flesh, 0, 1.25, 0));
+    for (let i = 0; i < 4; i++) r.add(box(0.37, 0.025, 0.21, this.mat(0x5a1810), 0, 1.08 + i * 0.12, -0.005).rotateZ(rand(-0.3, 0.3)));
+    r.add(box(0.44, 0.06, 0.28, rope, 0, 0.98, 0));
+    const hood = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.62, 5), sack);
+    hood.position.set(0, 1.78, 0);
+    r.add(hood);
+    this.eyeMat = new THREE.MeshBasicMaterial({ color: 0xff3020, fog: false });
+    for (const side of [-1, 1]) {
+      const e = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.03, 0.02), this.eyeMat);
+      e.position.set(side * 0.05, 1.68, 0.17);
+      r.add(e);
+    }
+    this.arm = new THREE.Group();
+    this.arm.rotation.order = 'YXZ';
+    this.arm.position.set(-0.24, 1.5, 0);
+    this.arm.add(box(0.09, 0.6, 0.09, flesh, 0, -0.3, 0));
+    this.arm.add(box(0.05, 0.3, 0.05, this.mat(0x2a1e14), 0, -0.7, 0));
+    // The flail: a short chain of links ending in a spiked ball.
+    this.links = [];
+    let parent = this.arm;
+    for (let i = 0; i < 4; i++) {
+      const link = new THREE.Group();
+      link.position.set(0, i === 0 ? -0.85 : -0.14, 0);
+      link.add(box(0.04, 0.12, 0.04, iron, 0, -0.06, 0));
+      parent.add(link);
+      this.links.push(link);
+      parent = link;
+    }
+    const ball = new THREE.Mesh(new THREE.IcosahedronGeometry(0.1, 0), iron);
+    ball.position.y = -0.2;
+    parent.add(ball);
+    this.offArm = new THREE.Group();
+    this.offArm.position.set(0.24, 1.5, 0);
+    this.offArm.add(box(0.09, 0.6, 0.09, flesh, 0, -0.3, 0));
+    r.add(this.arm, this.offArm);
+    this.rig.add(r);
+    this.speed = 4.2 * this.speedMult * rand(0.9, 1.1);
+    this.cooldown = rand(0.4, 1.2);
+    this.walk = rand(0, TAU);
+  }
+
+  get fury() { return this.hp < this.maxHp * 0.5 ? 0.78 : 1; }
+
+  think(dt) {
+    this.cooldown -= dt;
+    const d = this.distToPlayer();
+    switch (this.state) {
+      case 'chase':
+        this.chase(dt, this.speed / this.fury, 1.8);
+        if (d < 3 && this.cooldown <= 0) {
+          this.combo = [0.5, 0.26, 0.26, 0.45].map((t) => t * this.fury);
+          this.comboIndex = 0;
+          this.beginWindup(this.combo[0]);
+        }
+        break;
+      case 'windup':
+        this.brake(dt, 10);
+        this.facePlayer(dt, 8);
+        if (this.stateTime >= this.windupTime) {
+          this.setState('strike');
+          this.struck = false;
+          this.game.audio.play('whip');
+        }
+        break;
+      case 'strike': {
+        const f = this.forward();
+        this.vel.set(f.x * 3.5, 0, f.z * 3.5);
+        if (!this.struck && this.stateTime > 0.05) {
+          this.struck = true;
+          this.attackPlayer({ damage: 10, range: 2.6, arc: 1.8 });
+          if (this.state !== 'strike') break;
+        }
+        if (this.stateTime > 0.16) {
+          if (++this.comboIndex < this.combo.length) this.beginWindup(this.combo[this.comboIndex]);
+          else this.setState('recover');
+        }
+        break;
+      }
+      case 'recover':
+        this.brake(dt, 8);
+        if (this.stateTime > 0.8) {
+          this.cooldown = rand(0.5, 1.3);
+          this.setState('chase');
+        }
+        break;
+    }
+  }
+
+  animate(dt) {
+    const speedN = Math.min(1, Math.hypot(this.vel.x, this.vel.z) / 4);
+    this.walk += dt * 11 * speedN;
+    const s = Math.sin(this.walk) * 0.75 * speedN;
+    this.legs[0].rotation.x = s;
+    this.legs[1].rotation.x = -s;
+    const side = this.comboIndex % 2 ? -1 : 1;
+    let ax = -0.4 - s * 0.3, ay = 0, lean = 0.2 * speedN + 0.1, whirl = this.game.time * 14;
+    switch (this.state) {
+      case 'windup': ax = -2.6; ay = -0.7 * side; lean = -0.1; break;
+      case 'strike': ax = -0.6; ay = 0.9 * side; lean = 0.35; break;
+      case 'stagger': case 'broken': ax = 0.4; lean = -0.4; whirl = 0; break;
+    }
+    const rate = this.state === 'strike' ? 36 : 14;
+    this.arm.rotation.x = damp(this.arm.rotation.x, ax, rate, dt);
+    this.arm.rotation.y = damp(this.arm.rotation.y, ay, rate, dt);
+    this.offArm.rotation.x = damp(this.offArm.rotation.x, s * 0.5 - 0.3, 12, dt);
+    this.root.rotation.x = damp(this.root.rotation.x, lean, 12, dt);
+    // The chain whirls overhead in the wind-up, and trails otherwise.
+    this.links.forEach((l, i) => {
+      l.rotation.x = this.state === 'windup' ? Math.sin(whirl + i) * 0.6 : damp(l.rotation.x, 0.3, 6, dt);
+      l.rotation.z = this.state === 'windup' ? Math.cos(whirl + i) * 0.6 : damp(l.rotation.z, 0, 6, dt);
+    });
+    this.eyeMat.color.setHex(this.state === 'windup' ? 0xffe0a0 : this.fury < 1 ? 0xff0000 : 0xff3020);
+  }
+}
+
 export const ENEMY_TYPES = {
   hollow: { name: 'Hollow', create: (g, a, x, y, z) => new Skeleton(g, a, x, y, z) },
   shade: { name: 'Shade', create: (g, a, x, y, z) => new Shade(g, a, x, y, z) },
@@ -1496,6 +1864,8 @@ export const ENEMY_TYPES = {
   hound: { name: 'Ember Hound', create: (g, a, x, y, z) => new EmberHound(g, a, x, y, z) },
   drowned: { name: 'Drowned', create: (g, a, x, y, z) => new Drowned(g, a, x, y, z) },
   gargoyle: { name: 'Gargoyle', create: (g, a, x, y, z) => new Gargoyle(g, a, x, y, z) },
+  arbalist: { name: 'Arbalist', create: (g, a, x, y, z) => new Arbalist(g, a, x, y, z) },
+  flagellant: { name: 'Flagellant', create: (g, a, x, y, z) => new Flagellant(g, a, x, y, z) },
   warden: { name: 'Guardian', create: (g, a, x, y, z) => new Warden(g, a, x, y, z, 'Sparring Guardian') },
 };
 

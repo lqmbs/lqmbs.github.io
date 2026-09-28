@@ -28,7 +28,9 @@ export class RetroPass {
       levels: { value: CONFIG.ditherLevels },
       shadowTint: { value: new THREE.Color(0x1a2a50) },
     };
+    this.pixelSize = CONFIG.pixelSize;
     const material = new THREE.ShaderMaterial({
+      defines: { BLOOM_TAPS: 16 },
       uniforms: this.uniforms,
       depthTest: false,
       depthWrite: false,
@@ -63,14 +65,14 @@ export class RetroPass {
 
           // Golden-angle bloom: only very bright pixels (crystals, flames, lantern) bleed.
           vec3 bloom = vec3(0.0);
-          for (int i = 0; i < 16; i++) {
+          for (int i = 0; i < BLOOM_TAPS; i++) {
             float fi = float(i);
             float a = fi * 2.39996;
             float r = sqrt(fi + 0.5) * 2.2;
             vec3 s = texture2D(tDiffuse, uv + vec2(cos(a), sin(a)) * r / resolution).rgb;
             bloom += max(s - 0.9, 0.0);
           }
-          col += bloom / 16.0 * 1.0;
+          col += bloom / float(BLOOM_TAPS);
 
           col = aces(col * 1.35);
           float lum = dot(col, vec3(0.299, 0.587, 0.114));
@@ -103,8 +105,16 @@ export class RetroPass {
     this.camera = new THREE.Camera();
   }
 
+  /** Fewer bloom taps are cheaper; more are smoother (graphics quality). */
+  setBloomTaps(n) {
+    const m = this.quad.material;
+    if (m.defines.BLOOM_TAPS === n) return;
+    m.defines.BLOOM_TAPS = n;
+    m.needsUpdate = true;
+  }
+
   setSize(w, h) {
-    const px = CONFIG.pixelSize;
+    const px = this.pixelSize;
     const rw = Math.max(1, Math.floor(w / px));
     const rh = Math.max(1, Math.floor(h / px));
     this.target.setSize(rw, rh);

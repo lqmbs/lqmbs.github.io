@@ -18,6 +18,8 @@ import { CLASSES } from './src/classes.js';
 import { Settings } from './src/settings.js';
 import { Sunfall, Shockwave } from './src/builds.js';
 import { Gore } from './src/gore.js';
+import { Weather } from './src/weather.js';
+import { Profile } from './src/meta.js';
 import { Pickup, dropCoins } from './src/pickups.js';
 import { DealRealm } from './src/realm.js';
 import { Cutscene } from './src/cutscene.js';
@@ -63,10 +65,17 @@ class Game {
     this.particles = new ParticleSystem(this.scene, 700, false);
     this.glow = new ParticleSystem(this.scene, 900, true);
     this.gore = new Gore(this);
+    this.weather = new Weather(this);
+    this.profile = new Profile();
+    this.oathMods = null;
+    this.lightningBoost = 0;
+    this.settings.onChange((k, v) => { if (k === 'quality') this.applyQuality(v); });
     this.initLights();
     this.initMist();
 
     this.player = new Player(this);
+    this.applyQuality(this.settings.get('quality'));
+    this.profile.applyUpgrades(this.player, this, false);
     this.player.viewmodel.setAspect(this.camera.aspect);
     this.hub = new Hub(this);
 
@@ -200,6 +209,7 @@ class Game {
       this.player.viewmodel.hemi.intensity = 1.6;
       u.shadowTint.value.setHex(0x506068);
       this.audio.setMode('hub');
+      this.weather.set('drizzle');
     } else if (env === 'devil' || env === 'angel') {
       // The realms: a blood moon over a lava sea, or a gold dawn above the clouds.
       const devil = env === 'devil';
@@ -234,6 +244,7 @@ class Game {
       this.player.viewmodel.hemi.color.setHex(devil ? 0xff6060 : 0xfff0d0);
       u.shadowTint.value.setHex(devil ? 0x401018 : 0x8090b0);
       this.audio.setMode('depths');
+      this.weather.set(devil ? 'ash' : 'motes');
     } else {
       this.sun.color.setHex(0xe6e2d4);
       const t = this.theme;
@@ -273,12 +284,42 @@ class Game {
       this.player.viewmodel.hemi.intensity = 1.3;
       u.shadowTint.value.setHex(t.sky);
       this.audio.setMode('depths');
+      this.weather.set({ crystal: 'crystal', sunken: 'rain', ember: 'ash', sunlit: 'motes' }[t.id] ?? null);
     }
+    this.hemiBase = this.hemi.intensity;
+  }
+
+  /**
+   * Graphics quality: render resolution, bloom taps, lantern shadows, and how much weather and
+   * blood the world keeps.
+   */
+  applyQuality(q) {
+    const Q = {
+      low: { pixel: 4, bloom: 8, shadow: 0, weather: 0.4, gore: 60 },
+      medium: { pixel: 3, bloom: 16, shadow: 512, weather: 1, gore: 140 },
+      high: { pixel: 2, bloom: 24, shadow: 1024, weather: 1.6, gore: 260 },
+    }[q] ?? null;
+    if (!Q) return;
+    this.post.pixelSize = Q.pixel;
+    this.post.setBloomTaps(Q.bloom);
+    this.resize();
+    const l = this.player?.lantern;
+    if (l) {
+      l.castShadow = Q.shadow > 0;
+      if (Q.shadow && l.shadow.mapSize.x !== Q.shadow) {
+        l.shadow.mapSize.set(Q.shadow, Q.shadow);
+        l.shadow.map?.dispose();
+        l.shadow.map = null;
+      }
+    }
+    this.weather.setDensity(Q.weather);
+    this.gore.setSize(Q.gore);
   }
 
   get difficulty() {
     const d = this.depth - 1;
-    return { hp: 1 + 0.28 * d, damage: 1 + 0.15 * d, speed: 1 + 0.05 * d };
+    const o = this.mode === 'run' ? this.oathMods : null;
+    return { hp: 1 + 0.28 * d, damage: (1 + 0.15 * d) * (o?.damage ?? 1), speed: (1 + 0.05 * d) * (o?.speed ?? 1) };
   }
 
   get theme() { return this.biome ?? BIOMES.crystal; }
@@ -358,7 +399,12 @@ class Game {
     this.floor?.dispose();
     this.floor = null;
     this.biome = null;
-    if (resetLoadout) this.player.resetLoadout();
+    this.oathMods = null;
+    this.run = null;
+    if (resetLoadout) {
+      this.player.resetLoadout();
+      this.profile.applyUpgrades(this.player, this, false);
+    }
     this.hub.build();
     this.gore.clear();
     this.setEnvironment('hub');
@@ -380,10 +426,18 @@ class Game {
       this.hub.clearEnemies();
       this.hub.exit();
       this.player.resetLoadout();
-      this.hud.renderRelics(this.player);
-      this.hud.renderLoadout(this.player);
+      const P = this.profile;
+      this.oathMods = { damage: P.sworn('wrath') ? 1.25 : 1, speed: P.sworn('hunt') ? 1.2 : 1, thirst: P.sworn('thirst') };
+      this.run = { depth: 1, floors: 0, bosses: 0, elites: 0, kills: 0, multiplier: P.multiplier };
       this.hud.setMinimapVisible(true);
       this.newFloor();
+      P.applyUpgrades(this.player, this, true);
+      if (P.sworn('frailty')) {
+        this.player.stats.maxHp = Math.round(this.player.stats.maxHp * 0.7);
+        this.player.hp = this.player.stats.maxHp;
+      }
+      this.hud.renderRelics(this.player);
+      this.hud.renderLoadout(this.player);
       this.hud.banner(this.hud.floorName.textContent, 'floor', 2.8);
     }, 0.9);
   }
@@ -401,7 +455,8 @@ class Game {
     this.floor.build();
     const name = `${this.biome.name}`;
     this.hud.setFloor(this.depth, name);
-    this.player.flasks = this.player.maxFlasks;
+    if (!(this.oathMods?.thirst && this.depth > 1)) this.player.flasks = this.player.maxFlasks;
+    if (this.run) this.run.depth = this.depth;
     this.player.stats.deathWard = this.player.stats.wardMax || 0;
     this.player.summoner.clear();
     this.player.reveal();
@@ -530,10 +585,13 @@ class Game {
 
   descend() {
     this.audio.play('descend');
+    if (this.run) this.run.floors++;
     if (this.depth >= EXPEDITION_FLOORS) {
+      const earned = this.run ? this.profile.settle(this.run, true) : 0;
       this.runTransition(() => {
         this.enterHub(true);
         this.hud.banner('EXPEDITION COMPLETE', '', 4);
+        this.hud.toast(`+${earned} Ashes`, 'Spend them at the Ashen Shrine', 0xff8a40);
       }, 1.2);
       return;
     }
@@ -708,10 +766,12 @@ class Game {
   }
 
   openClassMenu() { this.openMenu('class'); }
+  openShrine() { this.openMenu('shrine'); }
   openSpawnMenu() { this.openMenu('spawn'); }
 
   chooseClass(id) {
     this.player.setClass(id);
+    this.profile.applyUpgrades(this.player, this, false);
     this.hud.renderRelics(this.player);
     this.hud.renderLoadout(this.player);
     this.audio.play('pickup');
@@ -808,6 +868,65 @@ class Game {
       e.ignite(4, 6);
       e.flash = 0.2;
     }
+  }
+
+  /** How loud the war drums should be: 0 exploring, 1 in a fight, 2 against a guardian. */
+  musicLevel() {
+    if (this.state === 'dead' || this.mode !== 'run' || !this.room || this.realm) return 0;
+    if (this.room.state !== 'combat') return 0;
+    return this.room.enemies.some((e) => e.isBoss && !e.dead) ? 2 : 1;
+  }
+
+  /**
+   * Only a few foes press the attack at once — the nearest melee fighters hold the "tokens" —
+   * while the rest circle at the edge of reach, waiting for an opening.
+   */
+  assignTokens() {
+    const p = this.player.pos;
+    const melee = this.nearbyEnemies().filter((e) => e.active && !e.isBoss && !e.ranged && !e.asleep);
+    melee.sort((a, b) => a.pos.distanceToSquared(p) - b.pos.distanceToSquared(p));
+    const n = 2 + (this.depth >= 3 ? 1 : 0);
+    melee.forEach((e, i) => { e.token = i < n; });
+  }
+
+  // ---- Guardians ------------------------------------------------------------------
+
+  /** Half its life gone: the guardian rears up and roars. */
+  onBossPhase(boss) {
+    this.audio.play('roar');
+    this.slowmo = Math.max(this.slowmo, 0.7);
+    this.shake(0.6);
+    this.hud.banner(boss.name.toUpperCase(), 'warn', 2.4);
+    this.hud.bossName.textContent = boss.name;
+  }
+
+  /** The roar lands: a shockwave throws the knight back, and the arena changes. */
+  bossRoar(boss) {
+    const p = this.player;
+    this.addEffect(new Shockwave(this, boss.pos, 10, boss.auraColor, 0.6));
+    this.addEffect(new Shockwave(this, boss.pos, 6, 0xffffff, 0.35));
+    this.shake(0.9);
+    this.flash = Math.max(this.flash, 0.5);
+    this.impact = 1;
+    this.fovKick = -6;
+    if (p.pos.distanceTo(boss.pos) < 9) p.pushFrom(boss.pos, 16);
+    this.glow.burst(boss.pos.clone().setY(boss.pos.y + boss.height * 0.6), 80, () => ({
+      vel: new THREE.Vector3(rand(-9, 9), rand(0, 7), rand(-9, 9)), life: rand(0.5, 1.2), size: rand(0.06, 0.14), color: boss.auraColor, drag: 2,
+    }));
+  }
+
+  onBossKilled(boss) {
+    this.slowmo = Math.max(this.slowmo, 1.6);
+    this.flash = 1;
+    this.impact = 1;
+    this.shake(1);
+    this.audio.play('boss-death');
+    const c = boss.pos.clone().setY(boss.pos.y + boss.height * 0.5);
+    this.addEffect(new Shockwave(this, boss.pos, 14, boss.auraColor, 1.0));
+    this.glow.burst(c, 120, () => ({
+      vel: new THREE.Vector3(rand(-6, 6), rand(0, 9), rand(-6, 6)), life: rand(0.8, 2), size: rand(0.06, 0.16), color: chance(0.5) ? boss.auraColor : 0xffe0b0, drag: 1.5,
+    }));
+    this.gore.splat(boss.pos, 3.5, boss.bloodColor, boss.chamber.world);
   }
 
   // ---- Executions, dodges, charged blows, plunges -------------------------------------
@@ -1083,6 +1202,11 @@ class Game {
     // The Revenant's Immortal March raises what fell recently.
     this.recentDeaths = (this.recentDeaths || []).filter((d) => this.time - d.t < 20);
     this.recentDeaths.push({ pos: enemy.pos.clone(), height: enemy.height, t: this.time });
+    if (this.run) {
+      this.run.kills++;
+      if (enemy.isBoss) this.run.bosses++;
+      else if (enemy.elite) this.run.elites++;
+    }
     if (this.mode !== 'run' || fell) return;
     // Coin, and now and then a key or a vial of blood.
     const area = enemy.chamber;
@@ -1116,6 +1240,9 @@ class Game {
       }, 1400);
       return;
     }
+    const earned = this.run ? this.profile.settle(this.run, false) : 0;
+    this.run = null;
+    this.deathScreen.querySelector('.died-ashes').textContent = earned ? `The dark keeps your body. Your ashes return: +${earned}` : '';
     setTimeout(() => {
       if (this.state !== 'dead') return;
       this.deathScreen.classList.remove('hidden');
@@ -1224,6 +1351,8 @@ class Game {
         const r = this.floor.roomAt(this.player.pos.x, this.player.pos.z, this.player.pos.y);
         if (r && r !== this.room) this.switchRoom(r);
         this.floor.update(dt, this.room);
+        this.tokenTimer = (this.tokenTimer || 0) - dt;
+        if (this.tokenTimer <= 0) { this.tokenTimer = 0.25; this.assignTokens(); }
         this.lightTimer -= realDt;
         if (this.lightTimer <= 0) {
           this.lightTimer = 0.35;
@@ -1317,6 +1446,9 @@ class Game {
     }
     this.hurtFlash = Math.max(0, this.hurtFlash - realDt * 2.5);
     this.flash = Math.max(0, this.flash - realDt * 3);
+    this.weather.update(dt);
+    if (this.hemiBase !== undefined) this.hemi.intensity = this.hemiBase + this.lightningBoost * 1.6;
+    this.audio.setIntensity(this.musicLevel());
     this.impact = Math.max(0, this.impact - realDt * 3.2);
     this.fovKick = damp(this.fovKick, 0, 7, realDt);
     this.focusFx = damp(this.focusFx, this.slowmo > 0 || this.player.state === 'execute' ? 1 : 0, this.slowmo > 0 ? 12 : 4, realDt);

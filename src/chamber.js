@@ -10,6 +10,7 @@ import { Chest, Pickup, dropCoins } from './pickups.js';
 import { Shop } from './shop.js';
 import { DealPortal } from './realm.js';
 import { Warden, pickEnemyType, eliteGroup, separateEnemies } from './enemies.js';
+import { BOSSES } from './bosses.js';
 import { R, along, latOf, linkIslands, COMBAT_LAYOUTS, SPECIAL_LAYOUTS } from './layouts.js';
 
 /** Distance between neighbouring chamber centres on a floor. */
@@ -546,6 +547,11 @@ export class Chamber {
         const p = this.spawnPoint(0);
         if (chance(0.6)) {
           const e = new Type(game, this, p.x, p.y, p.z);
+          // Now and then, deeper down, a champion walks among the rank and file.
+          if (game.depth >= 2 && !this.hasChampion && chance(0.14)) {
+            this.hasChampion = true;
+            e.makeElite({ affixes: 1, bar: false });
+          }
           e.makeDormant();
           this.enemies.push(e);
         } else this.pending.push({ Type, p });
@@ -554,7 +560,7 @@ export class Chamber {
       for (const { Type, elite } of eliteGroup(biome, game.depth)) {
         const p = this.spawnPoint(0);
         const e = new Type(game, this, p.x, p.y, p.z);
-        if (elite) e.makeElite();
+        if (elite) e.makeElite({ affixes: Math.min(3, game.depth) });
         e.makeDormant();
         this.enemies.push(e);
       }
@@ -585,7 +591,8 @@ export class Chamber {
       const pp = game.player.pos;
       const dx = pp.x - c.x, dz = pp.z - c.z;
       const d = Math.hypot(dx, dz) || 1;
-      const boss = new Warden(game, this, c.x - (dx / d) * 5, c.y, c.z - (dz / d) * 5, this.floor.biome.boss);
+      const Guardian = BOSSES[this.floor.biome.id] ?? Warden;
+      const boss = new Guardian(game, this, c.x - (dx / d) * 5, c.y, c.z - (dz / d) * 5, this.floor.biome.boss);
       this.enemies.push(boss);
       game.hud.showBoss(boss);
       game.hud.banner(boss.name, 'warn', 2.6);

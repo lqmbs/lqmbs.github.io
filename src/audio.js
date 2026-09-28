@@ -130,6 +130,59 @@ export class AudioEngine {
   play(name, arg = 0) {
     if (!this.ctx || this.muted) return;
     switch (name) {
+      case 'thunder':
+        this.noise({ dur: 2.8, type: 'lowpass', f: 260, f2: 60, gain: 0.8, attack: 0.05 });
+        this.noise({ t: 0.1, dur: 1.2, type: 'lowpass', f: 900, f2: 120, gain: 0.35, attack: 0.02 });
+        this.tone({ dur: 2.5, f: 45, f2: 28, gain: 0.4, attack: 0.1 });
+        break;
+      case 'rattle':
+        for (let i = 0; i < 6; i++) this.noise({ t: i * 0.05 + rand(0, 0.02), dur: 0.03, type: 'bandpass', f: rand(1400, 2600), q: 5, gain: 0.12 });
+        break;
+      case 'tidewave':
+        this.noise({ dur: 1.4, type: 'lowpass', f: 900, f2: 200, gain: 0.5, attack: 0.08 });
+        this.tone({ dur: 1.0, f: 80, f2: 40, gain: 0.35 });
+        break;
+      case 'toll':
+        this.metal(196, 3.2, 0.2);
+        this.metal(98, 3.6, 0.15, 0.01);
+        this.noise({ dur: 0.5, type: 'lowpass', f: 500, f2: 100, gain: 0.6 });
+        break;
+      case 'chain':
+        for (let i = 0; i < 8; i++) this.metal(rand(1800, 3200), 0.12, 0.03, i * 0.025);
+        this.noise({ dur: 0.3, f: 2000, f2: 600, q: 2, gain: 0.2 });
+        break;
+      case 'rush':
+        this.noise({ dur: 1.0, type: 'lowpass', f: 300, gain: 0.5, attack: 0.1 });
+        for (let i = 0; i < 6; i++) this.tone({ t: i * 0.16, dur: 0.12, f: 60, f2: 35, gain: 0.5 });
+        break;
+      case 'roar':
+        this.tone({ dur: 1.8, type: 'sawtooth', f: 70, f2: 45, gain: 0.3, attack: 0.15 });
+        this.tone({ dur: 1.8, type: 'sawtooth', f: 73.5, f2: 47, gain: 0.3, attack: 0.15 });
+        this.noise({ dur: 1.6, type: 'bandpass', f: 400, f2: 180, q: 1.2, gain: 0.5, attack: 0.15 });
+        break;
+      case 'echo':
+        this.tone({ dur: 1.2, type: 'sine', f: 1320, f2: 660, gain: 0.06, attack: 0.05 });
+        this.tone({ t: 0.15, dur: 1.2, type: 'sine', f: 990, f2: 495, gain: 0.04, attack: 0.05 });
+        break;
+      case 'sizzle':
+        this.noise({ dur: 0.25, type: 'highpass', f: 2500, gain: 0.12 });
+        break;
+      case 'crank':
+        for (let i = 0; i < 4; i++) this.noise({ t: i * 0.08, dur: 0.03, type: 'bandpass', f: 1200, q: 6, gain: 0.12 });
+        break;
+      case 'crossbow':
+        this.noise({ dur: 0.08, type: 'highpass', f: 1500, gain: 0.4 });
+        this.tone({ dur: 0.2, type: 'triangle', f: 180, f2: 90, gain: 0.3 });
+        break;
+      case 'whip':
+        this.noise({ dur: 0.12, f: 3500, f2: 900, q: 2, gain: 0.3 });
+        this.metal(rand(900, 1200), 0.15, 0.04, 0.03);
+        break;
+      case 'boss-death':
+        this.tone({ dur: 3.5, f: 55, f2: 27, gain: 0.8, attack: 0.05 });
+        this.noise({ dur: 2.5, type: 'lowpass', f: 700, f2: 60, gain: 0.7 });
+        [261.6, 311.1, 392, 523.3].forEach((f, i) => this.tone({ t: 0.6 + i * 0.12, dur: 3, type: 'triangle', f, gain: 0.05 }));
+        break;
       case 'charge':
         this.noise({ dur: 0.75, type: 'bandpass', f: 300, f2: 1400, q: 3, gain: 0.12, attack: 0.3 });
         this.tone({ dur: 0.75, type: 'sawtooth', f: 55, f2: 82, gain: 0.06, attack: 0.3 });
@@ -474,8 +527,82 @@ export class AudioEngine {
   }
 
   /** Drips, crystal chimes and far-off rumbles so the silence never feels empty. */
+  /**
+   * Combat music over the drone: 0 = exploring (silence but the cavern), 1 = a fight (war drums
+   * and a dissonant string pad), 2 = a guardian (faster drums, a choir above).
+   */
+  setIntensity(level) {
+    if (!this.ctx) return;
+    if (!this.music) this.startMusic();
+    if (level === this.intensity) return;
+    this.intensity = level;
+    const now = this.ctx.currentTime;
+    this.music.pad.gain.setTargetAtTime(level > 0 ? (level === 2 ? 0.05 : 0.032) : 0.0001, now, level > 0 ? 0.6 : 2.5);
+    this.music.choir.gain.setTargetAtTime(level === 2 ? 0.028 : 0.0001, now, 1.2);
+    if (level > 0 && this.music.nextBeat < now) this.music.nextBeat = now + 0.05;
+  }
+
+  startMusic() {
+    const ctx = this.ctx;
+    const voice = (freqs, type, cutoff, detune) => {
+      const gain = ctx.createGain();
+      gain.gain.value = 0.0001;
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.value = cutoff;
+      filter.connect(gain);
+      gain.connect(this.master);
+      gain.connect(this.reverb);
+      for (const f of freqs) {
+        for (const d of [-detune, detune]) {
+          const o = ctx.createOscillator();
+          o.type = type;
+          o.frequency.value = f;
+          o.detune.value = d;
+          o.connect(filter);
+          o.start();
+        }
+      }
+      const lfo = ctx.createOscillator();
+      lfo.frequency.value = 0.13;
+      const lg = ctx.createGain();
+      lg.gain.value = cutoff * 0.4;
+      lfo.connect(lg).connect(filter.frequency);
+      lfo.start();
+      return gain;
+    };
+    // D minor with a flattened second grinding underneath.
+    const pad = voice([73.4, 77.8, 110, 174.6], 'sawtooth', 520, 9);
+    const choir = voice([293.7, 349.2, 440, 587.3], 'triangle', 1400, 6);
+    this.music = { pad, choir, nextBeat: ctx.currentTime, step: 0 };
+    this.intensity = 0;
+  }
+
+  /** The war drums: scheduled a little ahead so they keep time whatever the frame rate. */
+  drums() {
+    const ctx = this.ctx, M = this.music;
+    const boss = this.intensity === 2;
+    const eighth = 60 / (boss ? 104 : 84) / 2;
+    const pattern = boss ? [1, 0, 1, 1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 1, 1, 1] : [1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 0];
+    while (M.nextBeat < ctx.currentTime + 0.25) {
+      const t = Math.max(0, M.nextBeat - ctx.currentTime);
+      const i = M.step % 16;
+      if (pattern[i]) {
+        const accent = i % 8 === 0;
+        this.tone({ t, dur: accent ? 0.5 : 0.28, f: accent ? 62 : 78, f2: 38, gain: accent ? 0.5 : 0.3 });
+        this.noise({ t, dur: 0.08, type: 'lowpass', f: 500, gain: accent ? 0.25 : 0.12 });
+      }
+      if (boss && i % 2 === 1) this.noise({ t, dur: 0.03, type: 'highpass', f: 6000, gain: 0.04 });
+      if (i === 0 && M.step % 64 === 0) this.metal(146.8, 2.5, boss ? 0.06 : 0.04, t);
+      M.nextBeat += eighth;
+      M.step++;
+    }
+  }
+
   update(dt) {
     if (!this.ctx) return;
+    if (this.music && this.intensity > 0 && !this.muted) this.drums();
+    else if (this.music) this.music.nextBeat = this.ctx.currentTime;
     this.nextAmbient -= dt;
     if (this.nextAmbient <= 0) {
       const r = Math.random();

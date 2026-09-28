@@ -854,3 +854,28 @@ kbd {
 #exec-bars::before { top: 0; }
 #exec-bars::after { bottom: 0; }
 #hud.executing #exec-bars::before, #hud.executing #exec-bars::after { height: 8vh; }
+
+/* The Ashen Shrine */
+.menu-panel.shrine { max-width: 760px; }
+.shrine-head { font-family: var(--font-title); font-size: 13px; letter-spacing: 0.2em; text-transform: uppercase; color: #ff8a40; margin: 16px 0 6px; font-weight: normal; }
+.shrine-list { display: flex; flex-direction: column; gap: 4px; }
+.shrine-row { display: flex; align-items: center; gap: 12px; padding: 6px 10px; background: rgba(20, 14, 12, 0.6); border: 1px solid rgba(255, 138, 64, 0.12); }
+.shrine-row.oath.sworn { border-color: rgba(196, 42, 31, 0.8); background: rgba(60, 10, 8, 0.55); }
+.shrine-text { flex: 1; display: flex; flex-direction: column; }
+.shrine-text b { color: var(--bone); font-weight: normal; font-family: var(--font-title); font-size: 14px; }
+.shrine-desc { color: var(--bone-dim); font-size: 14px; }
+.shrine-row .pips i { display: inline-block; width: 9px; height: 9px; margin-left: 3px; border: 1px solid #ff8a40; transform: rotate(45deg); }
+.shrine-row .pips i.on { background: #ff8a40; }
+.shrine-buy { min-width: 98px; padding: 6px 10px; background: rgba(40, 20, 12, 0.9); color: #ffb070; border: 1px solid rgba(255, 138, 64, 0.5); font-family: var(--font-title); cursor: pointer; }
+.shrine-buy:disabled { opacity: 0.4; cursor: default; }
+.shrine-row.oath.sworn .shrine-buy { color: #ff6050; border-color: rgba(196, 42, 31, 0.8); }
+.shrine-stats { color: var(--bone-dim); font-size: 13px; margin-top: 14px; text-align: center; }
+.died-ashes { color: #ff8a40; font-family: var(--font-title); letter-spacing: 0.15em; margin-top: 18px; font-size: 16px; text-shadow: 0 0 12px rgba(255, 120, 40, 0.4); }
+.set-select { background: rgba(20, 16, 14, 0.9); color: var(--bone); border: 1px solid rgba(216, 207, 184, 0.3); padding: 3px 6px; font-family: var(--font-body); }
+.menu-panel.shrine { max-height: 94vh; overflow-y: auto; padding-top: 14px; padding-bottom: 14px; }
+.menu-panel.shrine .menu-title { margin: 0; }
+.menu-panel.shrine .menu-sub { margin: 2px 0 0; }
+.shrine-head { margin: 10px 0 4px; }
+.shrine-row { padding: 3px 10px; }
+.shrine-text { text-align: left; }
+.shrine-buy { padding: 4px 10px; }

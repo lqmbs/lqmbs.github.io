@@ -1,6 +1,7 @@
 import { CLASSES } from './classes.js';
 import { WEAPON_TYPES } from './weapons.js';
 import { ENEMY_TYPES } from './enemies.js';
+import { UPGRADES, OATHS } from './meta.js';
 
 const el = (tag, cls, text) => {
   const e = document.createElement(tag);
@@ -27,6 +28,7 @@ export class Menus {
     this.root.replaceChildren();
     this.hotkeys = [];
     if (kind === 'class') this.buildClassMenu();
+    else if (kind === 'shrine') this.buildShrineMenu();
     else this.buildSpawnMenu();
     this.root.classList.remove('hidden');
   }
@@ -89,6 +91,57 @@ export class Menus {
       cards.append(card);
     });
     panel.append(cards);
+    this.footer(panel);
+  }
+
+  /** The Ashen Shrine: spend ashes on lasting boons; swear oaths for richer ashes. */
+  buildShrineMenu() {
+    const game = this.game, P = game.profile;
+    const d = P.data;
+    const panel = this.frame('The Ashen Shrine', `Ashes of the fallen: ${P.ashes}`);
+    panel.classList.add('shrine');
+    const redraw = () => { this.root.replaceChildren(); this.hotkeys = []; this.buildShrineMenu(); };
+    panel.append(el('h3', 'shrine-head', 'Boons — kept for every descent'));
+    const list = el('div', 'shrine-list');
+    UPGRADES.forEach((u, i) => {
+      const row = el('div', 'shrine-row');
+      const lvl = P.level(u.id);
+      const pips = el('span', 'pips');
+      for (let k = 0; k < u.cost.length; k++) pips.append(el('i', k < lvl ? 'on' : ''));
+      const text = el('div', 'shrine-text');
+      text.append(el('b', '', u.name), el('span', 'shrine-desc', u.desc + (u.run ? ' (expeditions)' : '')));
+      const cost = P.nextCost(u);
+      const btn = el('button', 'shrine-buy', cost === null ? 'Complete' : `${cost} ashes`);
+      btn.disabled = cost === null || P.ashes < cost;
+      const buy = () => {
+        if (!P.buy(u.id)) { game.audio.play('empty'); return; }
+        game.audio.play('buy');
+        if (u.run) { /* takes effect on the next expedition */ } else {
+          game.player.resetLoadout();
+          P.applyUpgrades(game.player, game, false);
+          game.hud.renderLoadout(game.player);
+        }
+        redraw();
+      };
+      btn.addEventListener('click', buy);
+      this.hotkeys.push(buy);
+      row.append(el('span', 'spawn-key', `${i + 1}`), text, pips, btn);
+      list.append(row);
+    });
+    panel.append(list);
+    panel.append(el('h3', 'shrine-head', `Oaths — sworn for the next descent · ashes ×${P.multiplier.toFixed(2)}`));
+    const oaths = el('div', 'shrine-list');
+    for (const o of OATHS) {
+      const row = el('div', `shrine-row oath${P.sworn(o.id) ? ' sworn' : ''}`);
+      const text = el('div', 'shrine-text');
+      text.append(el('b', '', o.name), el('span', 'shrine-desc', `${o.desc} · +${Math.round(o.bonus * 100)}% ashes`));
+      const btn = el('button', 'shrine-buy', P.sworn(o.id) ? 'Sworn' : 'Swear');
+      btn.addEventListener('click', () => { P.toggleOath(o.id); game.audio.play(P.sworn(o.id) ? 'devil' : 'swap'); redraw(); });
+      row.append(text, btn);
+      oaths.append(row);
+    }
+    panel.append(oaths);
+    panel.append(el('p', 'shrine-stats', `Expeditions ${d.runs} · Completed ${d.wins} · Deepest floor ${d.bestDepth || '—'} · Guardians felled ${d.felled}`));
     this.footer(panel);
   }
 

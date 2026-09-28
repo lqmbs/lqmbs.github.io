@@ -222,6 +222,7 @@ export class Hub {
     this.buildTerrain();
     this.buildSeaAndSky();
     this.buildRoundHall();
+    this.buildShrine();
     this.buildNave();
     this.buildLibrary();
     this.buildArmory();
@@ -605,6 +606,33 @@ export class Hub {
       position: new THREE.Vector3(0, 0, 0), radius: 5.3,
       prompt: 'Rest at the Round Table', sub: 'Choose your class',
       interact: () => this.game.openClassMenu(),
+    });
+  }
+
+  /** The Ashen Shrine: a brazier of remembrance by the south door. Past expeditions' ashes buy lasting boons here. */
+  buildShrine() {
+    const M = this.M;
+    const x = -2.9, z = 6.3;
+    this.add(new THREE.CylinderGeometry(0.5, 0.66, 0.85, 8), M.stoneDark, composeMatrix(x, 0.42, z));
+    this.add(new THREE.CylinderGeometry(0.7, 0.62, 0.12, 8), M.stone, composeMatrix(x, 0.9, z));
+    this.add(new THREE.CylinderGeometry(0.62, 0.34, 0.34, 10), M.iron, composeMatrix(x, 1.12, z));
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * TAU;
+      this.part(GEO.cube, M.iron, composeMatrix(x + Math.cos(a) * 0.56, 1.3, z + Math.sin(a) * 0.56, 0, -a, 0.35), 0, 0, 0, 0.05, 0.36, 0.05);
+    }
+    const ember = new THREE.Mesh(new THREE.IcosahedronGeometry(0.26, 0), new THREE.MeshBasicMaterial({ color: 0xff7a2a }));
+    ember.position.set(x, 1.34, z);
+    this.group.add(ember);
+    this.shrineEmber = ember;
+    this.lightSpots.push({ pos: new THREE.Vector3(x, 1.9, z), color: 0xff6a20, weight: 3, distance: 9, intensity: 8 });
+    this.emitters.push({ kind: 'fire', pos: new THREE.Vector3(x, 1.4, z), spread: 0.25, rate: 16 });
+    this.world.addCircle(x, z, 0.72, -1, 1.4);
+    const game = this.game;
+    this.interactables.push({
+      position: new THREE.Vector3(x, 0, z), radius: 2.4,
+      prompt: 'Ashen Shrine',
+      get sub() { return `${game.profile.ashes} ashes · boons and oaths`; },
+      interact: () => game.openShrine(),
     });
   }
 
