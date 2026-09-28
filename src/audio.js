@@ -130,6 +130,53 @@ export class AudioEngine {
   play(name, arg = 0) {
     if (!this.ctx || this.muted) return;
     switch (name) {
+      case 'resonance':
+        [261.6, 329.6, 392, 523.3, 659.3].forEach((f, i) => this.tone({ t: i * 0.08, dur: 2.4, type: 'triangle', f, gain: 0.08 }));
+        this.metal(523.3, 2.4, 0.08, 0.3);
+        this.tone({ dur: 2, f: 65, f2: 55, gain: 0.35 });
+        break;
+      case 'void':
+        this.tone({ dur: 1.6, type: 'sawtooth', f: 90, f2: 30, gain: 0.25, attack: 0.1 });
+        this.noise({ dur: 1.4, type: 'bandpass', f: 300, f2: 80, q: 3, gain: 0.35, attack: 0.1 });
+        break;
+      case 'thunderclap':
+        this.noise({ dur: 0.08, type: 'highpass', f: 2500, gain: 0.7 });
+        this.noise({ t: 0.02, dur: 0.9, type: 'lowpass', f: 900, f2: 100, gain: 0.7 });
+        this.tone({ dur: 0.6, f: 70, f2: 30, gain: 0.5 });
+        break;
+      case 'caw':
+        this.tone({ dur: 0.18, type: 'sawtooth', f: 900, f2: 600, gain: 0.08 });
+        this.noise({ dur: 0.15, f: 1500, q: 4, gain: 0.1 });
+        break;
+      case 'whirl':
+        this.noise({ dur: 0.9, f: 600, f2: 2400, q: 2, gain: 0.25, attack: 0.1 });
+        break;
+      case 'beam':
+        this.tone({ dur: 0.7, type: 'sawtooth', f: 220, f2: 110, gain: 0.25, attack: 0.02 });
+        this.tone({ dur: 0.7, type: 'square', f: 440, f2: 220, gain: 0.06, attack: 0.02 });
+        this.noise({ dur: 0.6, type: 'bandpass', f: 1800, f2: 400, q: 2, gain: 0.3 });
+        break;
+      case 'demon-arm':
+        this.tone({ dur: 1, type: 'sawtooth', f: 55, f2: 40, gain: 0.35, attack: 0.05 });
+        this.noise({ dur: 0.8, type: 'lowpass', f: 600, f2: 150, gain: 0.6 });
+        break;
+      case 'hemorrhage':
+        this.noise({ dur: 0.35, type: 'lowpass', f: 900, f2: 200, gain: 0.6 });
+        this.noise({ t: 0.03, dur: 0.25, type: 'bandpass', f: 500, q: 3, gain: 0.3 });
+        this.tone({ dur: 0.3, f: 120, f2: 50, gain: 0.4 });
+        break;
+      case 'freeze':
+        for (let i = 0; i < 6; i++) this.tone({ t: i * 0.03, dur: 0.4, type: 'sine', f: rand(2000, 4000), gain: 0.03 });
+        this.noise({ dur: 0.4, type: 'highpass', f: 4000, gain: 0.15 });
+        break;
+      case 'curse':
+        this.tone({ dur: 0.8, type: 'triangle', f: 330, f2: 311, gain: 0.06, attack: 0.05 });
+        this.tone({ dur: 0.8, type: 'triangle', f: 466, f2: 440, gain: 0.05, attack: 0.05 });
+        break;
+      case 'detonate':
+        this.tone({ dur: 0.7, f: 80, f2: 30, gain: 0.8 });
+        this.noise({ dur: 0.6, type: 'lowpass', f: 1200, f2: 150, gain: 0.8 });
+        break;
       case 'thunder':
         this.noise({ dur: 2.8, type: 'lowpass', f: 260, f2: 60, gain: 0.8, attack: 0.05 });
         this.noise({ t: 0.1, dur: 1.2, type: 'lowpass', f: 900, f2: 120, gain: 0.35, attack: 0.02 });

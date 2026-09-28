@@ -652,7 +652,8 @@ export class Chamber {
    */
   offerDeal() {
     const game = this.game;
-    const odds = 0.4 + (game.tookDamage ? 0 : 0.35) + (game.depth > 1 ? 0.1 : 0);
+    // Deals are the heart of a strong run: the first guardian always draws a visitor.
+    const odds = game.depth === 1 ? 1 : 0.6 + (game.tookDamage ? 0 : 0.3) + (game.depth > 2 ? 0.1 : 0);
     if (!chance(odds)) return;
     const free = ['e', 'w', 'n', 's'].filter((d) => !this.neighbors[d]);
     const dir = free[0] ?? 'e';

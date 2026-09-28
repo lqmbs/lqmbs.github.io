@@ -603,7 +603,7 @@ export class DealRealm {
     // The trader, their wares, and the way home.
     const npcPos = new THREE.Vector3(O.x, 0.9, O.z - 12.2);
     const NPC = devil ? Broker : Seraph;
-    const items = rollItems(game.player, this.kind, 3);
+    const items = rollItems(game.player, this.kind, this.kind === 'devil' ? 4 : 3);
     const specs = items.map((item) => ({
       kind: 'item', item, name: item.name, desc: item.desc, lore: item.lore, color: hex(item.color),
       price: devil ? item.devilCost : 0,

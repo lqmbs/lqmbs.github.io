@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { rand, pick, TAU } from './util.js';
 import { Bolt } from './enemies.js';
+import { RESONANCES, COVENANTS } from './relics.js';
 
 const _v = new THREE.Vector3();
 
@@ -89,10 +90,137 @@ export class BuildFX {
     this.aegisMesh = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.1, 2.2, 16, 1, true), this.aegisMat);
     this.aegisMesh.visible = false;
     this.root.add(this.aegisMesh);
+    this.owned = new Map(); // relic id -> { def, n }
+    this.familiars = new Map(); // relic id -> [Familiar]
+    this.active = new Set(); // resonance / covenant ids in effect
+    this.mem = {}; // per-relic scratch (timers, counters)
+    this.Lightning = Lightning; // relics draw lightning without importing this module
+    this.mantle = false;
+    this.rage = false;
   }
+
+  // ---- Relic engine -------------------------------------------------------------
+
+  /** A relic joins the build: count it, grow its familiars, and check the resonances. */
+  acquire(item) {
+    const o = this.owned.get(item.id) || { def: item, n: 0 };
+    o.n++;
+    this.owned.set(item.id, o);
+    item.onAcquire?.(this, o.n);
+    this.syncFamiliars();
+    this.checkSets();
+  }
+
+  count(id) { return this.owned.get(id)?.n || 0; }
+
+  tagCount(tag) {
+    let n = 0;
+    for (const { def } of this.owned.values()) if (def.tags?.includes(tag)) n++;
+    return n;
+  }
+
+  /** Three relics that share a tag resonate; enough deals of one kind seal a covenant. */
+  checkSets() {
+    const p = this.player, game = this.game;
+    for (const [id, r] of Object.entries(RESONANCES)) {
+      if (this.active.has(id) || this.tagCount(r.tag) < 3) continue;
+      this.active.add(id);
+      game.onResonance(r);
+    }
+    for (const [id, c] of Object.entries(COVENANTS)) {
+      if (this.active.has(id) || !c.test(p)) continue;
+      this.active.add(id);
+      c.onAcquire?.(this);
+      game.onResonance(c);
+    }
+  }
+
+  /** Tell every relic (and every resonance) that something happened. */
+  fire(hook, ctx = {}) {
+    for (const [id, { def, n }] of this.owned) {
+      const h = def.hooks?.[hook];
+      if (h) h(this, n, ctx, this.mem[id] || (this.mem[id] = {}));
+    }
+    for (const id of this.active) {
+      const def = RESONANCES[id] || COVENANTS[id];
+      const h = def?.hooks?.[hook];
+      if (h) h(this, 1, ctx, this.mem[id] || (this.mem[id] = {}));
+    }
+  }
+
+  syncFamiliars() {
+    for (const [id, { def, n }] of this.owned) {
+      if (!def.familiar) continue;
+      const list = this.familiars.get(id) || [];
+      const want = Math.min(3, n);
+      while (list.length < want) {
+        const f = def.familiar(this, list.length);
+        this.game.addEffect(f);
+        list.push(f);
+      }
+      this.familiars.set(id, list);
+    }
+  }
+
+  clearFamiliars() {
+    for (const list of this.familiars.values()) for (const f of list) f.dead = true;
+    this.familiars.clear();
+  }
+
+  // ---- Helpers for relics -------------------------------------------------------
+
+  nearby(pos, r, { maxDy = 3 } = {}) {
+    return this.game.nearbyEnemies().filter((e) => e.active && Math.hypot(e.pos.x - pos.x, e.pos.z - pos.z) < r + e.radius && Math.abs(e.pos.y - pos.y) < maxDy);
+  }
+
+  nearest(pos, r = 14, exclude = null) {
+    let best = null, bd = r;
+    for (const e of this.game.nearbyEnemies()) {
+      if (!e.active || e === exclude) continue;
+      const d = e.pos.distanceTo(pos);
+      if (d < bd) { bd = d; best = e; }
+    }
+    return best;
+  }
+
+  /** Relic damage: scaled by the build, credited to the knight, never recursive. */
+  hurt(e, dmg, { from = null, knock = 1.5, result = 'spell' } = {}) {
+    if (!e.active) return;
+    const origin = from || this.player.pos;
+    const dir = e.pos.clone().sub(origin).setY(0);
+    if (dir.lengthSq() < 1e-6) dir.set(0, 0, 1);
+    dir.normalize();
+    const d = dmg * this.stats.damageMult;
+    e.takeRawDamage(d, dir, knock);
+    this.game.onEnemyHit(e, e.alive ? result : 'kill', dir, d, { proc: true });
+  }
+
+  aoe(pos, r, dmg, opts = {}) {
+    const hit = this.nearby(pos, r);
+    for (const e of hit) {
+      this.hurt(e, dmg, { from: pos, knock: opts.knock ?? 3 });
+      if (e.alive) opts.each?.(e);
+    }
+    return hit;
+  }
+
+  bolt(from, dir, color, opts = {}) {
+    const b = new Bolt(this.game, from, dir, this.player, color, { speed: 16, spell: false, ...opts });
+    this.game.addBolt(b);
+    return b;
+  }
+
+  /** Where the knight's weapon would be: a point in front of the eyes. */
+  get muzzle() { return this.player.eyePosition.addScaledVector(this.player.aim, 0.7).add(_v.set(0, -0.2, 0)); }
 
   reset() {
     this.hasteTimer = this.aegisTimer = this.surgeTimer = 0;
+    if (this.owned) for (const [id, { def }] of this.owned) def.onReset?.(this.mem[id] || {}, this.game);
+    this.owned?.clear();
+    this.clearFamiliars?.();
+    this.mantle = this.rage = false;
+    this.active?.clear();
+    this.mem = {};
     this.sync();
   }
 
@@ -128,15 +256,16 @@ export class BuildFX {
     return p.hp < p.stats.maxHp * 0.35 ? 1 + (p.stats.frenzy || 0) : 1;
   }
 
-  attackSpeedBonus() { return this.hasteTimer > 0 ? 1.5 : 1; }
+  attackSpeedBonus() { return (this.hasteTimer > 0 ? 1.5 : 1) * (this.rage ? 1.6 : 1); }
   damageTakenMult() { return (this.stats.damageTaken || 1) * (this.aegisTimer > 0 ? 0.5 : 1); }
 
   // ---- Hooks ------------------------------------------------------------------
 
   /** A melee swing leaves the hand (whether or not it connects). */
-  onSwing() {
+  onSwing(step = null) {
     const p = this.player, S = this.stats, game = this.game;
     const w = p.weapon;
+    this.fire('swing', { step });
     if (S.bladeWave > 0 && p.hp >= S.maxHp - 0.5) {
       const from = p.eyePosition.addScaledVector(p.aim, 0.6).add(_v.set(0, -0.25, 0));
       game.addBolt(new Bolt(game, from, p.aim, p, 0xfff0c0, {
@@ -154,6 +283,7 @@ export class BuildFX {
   /** The player's attack (melee or spell) connected. */
   onHit(e, dmg, result) {
     const S = this.stats, game = this.game;
+    this.fire('hit', { e, dmg, result });
     if (S.igniteOnHit > 0 && e.alive) e.ignite(3, S.igniteOnHit);
     if (S.chainChance > 0 && Math.random() < S.chainChance) this.chain(e, dmg * 0.55, 2);
     if (result === 'riposte' && S.parryHeal > 0) this.heal(S.parryHeal * 0.5);
@@ -188,6 +318,7 @@ export class BuildFX {
 
   onParry(attacker) {
     const S = this.stats, game = this.game, p = this.player;
+    this.fire('parry', { attacker });
     if (S.parryHeal > 0) this.heal(S.parryHeal);
     if (S.parryHaste > 0) this.hasteTimer = S.parryHaste;
     p.addUltCharge(10);
@@ -208,6 +339,7 @@ export class BuildFX {
 
   onKill(e) {
     const S = this.stats, game = this.game, p = this.player;
+    this.fire('kill', { e });
     p.addUltCharge(6);
     if (S.killHeal > 0) this.heal(S.killHeal);
     if (S.killMana > 0 && S.maxMana) p.mana = Math.min(S.maxMana, p.mana + S.killMana);
@@ -236,7 +368,12 @@ export class BuildFX {
     p.hp = p.stats.maxHp * 0.5;
     this.game.flash = 1;
     this.game.audio.play('angel');
-    this.game.hud.banner('NOT YET', 'floor', 2);
+    this.game.hud.banner(S.phoenix ? 'REBORN' : 'NOT YET', 'floor', 2);
+    if (S.phoenix) {
+      this.game.addEffect(new Shockwave(this.game, p.pos, 9, 0xffa040, 0.8));
+      this.game.glow.burst(p.pos.clone().setY(p.pos.y + 1), 90, () => ({ vel: new THREE.Vector3(rand(-8, 8), rand(1, 9), rand(-8, 8)), life: rand(0.5, 1.2), size: rand(0.07, 0.15), color: pick([0xffa040, 0xfff0b0, 0xff5a10]), drag: 2 }));
+      for (const e of this.nearby(p.pos, 7)) { this.hurt(e, 50, { knock: 8 }); e.ignite(5, 10); }
+    }
     this.game.addEffect(new Shockwave(this.game, p.pos, 6, 0xffe080, 0.7));
     return true;
   }
@@ -256,6 +393,7 @@ export class BuildFX {
     if (this.surgeTimer > 0 && S.maxMana) p.mana = S.maxMana;
     this.spin += dt * 3.2;
     const t = game.time;
+    if (this.owned.size || this.active.size) this.fire('update', { dt });
     this.root.visible = game.state !== 'title';
 
     // Orbiting knives.
@@ -271,7 +409,7 @@ export class BuildFX {
         if (Math.hypot(e.pos.x - g.position.x, e.pos.z - g.position.z) > e.radius + 0.35) continue;
         if (Math.abs(e.pos.y + e.height * 0.5 - g.position.y) > e.height) continue;
         const last = this.bladeHits.get(e) ?? -10;
-        if (t - last < 0.45) continue;
+        if (t - last < 0.45 / (S.bladeRate || 1)) continue;
         this.bladeHits.set(e, t);
         const dir = e.pos.clone().sub(p.pos).setY(0).normalize();
         const dmg = 6 * p.stats.damageMult;

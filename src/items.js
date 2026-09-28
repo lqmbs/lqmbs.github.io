@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { rand, easeOut, pick } from './util.js';
+import { RELICS } from './relics.js';
 
 /**
  * Relics. Most change the numbers; the ones marked with a `mech` change *how you play* — they
@@ -98,6 +99,8 @@ export const ITEMS = [
   { id: 'dove', name: 'Dove of Ash', desc: 'Max health +40, fully healed, one more flask', lore: 'It flew out of the fire, and it was not burned.', color: 0xe8e0d0, shape: 'wing', pools: ['angel'],
     apply: (s, p) => { s.maxHp += 40; p.hp = s.maxHp; p.maxFlasks += 1; p.flasks += 1; } },
 ];
+
+ITEMS.push(...RELICS);
 
 export const itemById = (id) => ITEMS.find((i) => i.id === id);
 
@@ -212,6 +215,34 @@ export function buildItemMesh(item) {
       add(new THREE.DodecahedronGeometry(0.1), -0.12);
       break;
     case 'halo': add(new THREE.TorusGeometry(0.18, 0.03, 5, 20)).rotation.x = Math.PI / 2; break;
+    case 'eye':
+      add(new THREE.SphereGeometry(0.16, 10, 8)).scale.set(1, 0.7, 0.6);
+      add(new THREE.TorusGeometry(0.2, 0.025, 4, 16));
+      break;
+    case 'feather': add(new THREE.ConeGeometry(0.07, 0.5, 4)).scale.set(1, 1, 0.25); break;
+    case 'skull':
+      add(new THREE.BoxGeometry(0.26, 0.24, 0.26));
+      add(new THREE.BoxGeometry(0.18, 0.09, 0.2), -0.15);
+      break;
+    case 'star':
+      for (let i = 0; i < 3; i++) add(new THREE.OctahedronGeometry(0.2)).rotation.set(i, i * 0.7, 0);
+      break;
+    case 'tome':
+      add(new THREE.BoxGeometry(0.3, 0.38, 0.08));
+      add(new THREE.BoxGeometry(0.26, 0.34, 0.1));
+      break;
+    case 'claw':
+      for (let i = 0; i < 3; i++) {
+        const c = add(new THREE.ConeGeometry(0.04, 0.34, 4));
+        c.position.x = (i - 1) * 0.09;
+        c.rotation.z = (i - 1) * 0.25;
+      }
+      break;
+    case 'gem': add(new THREE.OctahedronGeometry(0.18)).scale.set(1, 1.3, 1); break;
+    case 'chain':
+      for (let i = 0; i < 4; i++) add(new THREE.TorusGeometry(0.06, 0.018, 4, 10), -0.18 + i * 0.12).rotation.y = i * Math.PI / 2;
+      break;
+    default: add(new THREE.IcosahedronGeometry(0.17)); break;
   }
   return g;
 }

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { rand, chance, clamp, damp, dampAngle, angleDiff, headingTo, easeOut, TAU, shuffle } from './util.js';
 import { FirePool } from './hazards.js';
+import { updateStatus, statusDamageMult, slowFactor, onIgnite, onDamaged } from './status.js';
 
 const _v = new THREE.Vector3();
 
@@ -480,11 +481,13 @@ export class Enemy {
   ignite(duration, dps) {
     this.burnTime = Math.max(this.burnTime || 0, duration);
     this.burnDps = Math.max(this.burnDps || 0, dps);
+    onIgnite(this.game, this);
   }
 
   takeRawDamage(amount, dir, knock) {
     if (this.dead) return;
     if (this.ward) amount *= 0.3;
+    amount *= statusDamageMult(this);
     this.hp -= amount;
     this.flash = 0.09;
     // Frenzied champions go berserk when badly hurt.
@@ -504,6 +507,7 @@ export class Enemy {
     this.vel.addScaledVector(dir, knock / this.mass);
     if (knock > 0) this.knockTimer = 0.3;
     if (this.hp <= 0) this.die();
+    else if (this.status || this.frozen > 0) onDamaged(this.game, this, amount);
   }
 
   onFlinch() {}
@@ -637,14 +641,24 @@ export class Enemy {
     }
     if (this.ward) this.ward.material.opacity = 0.12 + 0.06 * Math.sin(this.game.time * 4);
 
-    if (!this.updateCommonStates(dt)) {
+    if (this.status) {
+      updateStatus(this.game, this, dt);
+      if (this.dead) return;
+    }
+    if (this.frozen > 0) {
+      // Frozen solid: nothing moves until the ice breaks or thaws.
+      this.frozen -= dt;
+      this.brake(dt, 30);
+      this.stateTime = 0;
+    } else if (!this.updateCommonStates(dt)) {
       if (this.player.alive) this.think(dt);
       else this.brake(dt, 4);
     }
 
     // Physics: edge-cautious unless knocked back, in which case the abyss may claim them.
     const world = this.chamber.world;
-    world.move(this.pos, this.pos.y, this.vel.x * dt, this.vel.z * dt, this.radius, this.height, { allowFall: this.knockTimer > 0 });
+    const slow = this.knockTimer > 0 ? 1 : slowFactor(this);
+    world.move(this.pos, this.pos.y, this.vel.x * dt * slow, this.vel.z * dt * slow, this.radius, this.height, { allowFall: this.knockTimer > 0 });
     const p = this.player.pos;
     const dx = this.pos.x - p.x, dz = this.pos.z - p.z;
     const d = Math.hypot(dx, dz), min = this.radius + this.player.radius;

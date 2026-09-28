@@ -479,6 +479,7 @@ class Game {
   switchRoom(room) {
     this.room = room;
     room.onPlayerEnter();
+    this.player.fx.fire('roomEnter', { room });
     this.hud.drawMinimap(this.floor, room, this.player);
   }
 
@@ -581,6 +582,9 @@ class Game {
     for (const b of this.bolts) b.dispose();
     this.effects.length = 0;
     this.bolts.length = 0;
+    // Familiars live among the effects: call them back.
+    this.player.fx.familiars.clear();
+    this.player.fx.syncFamiliars();
   }
 
   descend() {
@@ -870,6 +874,29 @@ class Game {
     }
   }
 
+  /** Three relics of a kind, or a covenant sealed: announce it. */
+  onResonance(r) {
+    this.audio.play('resonance');
+    this.flash = Math.max(this.flash, 0.6);
+    this.impact = Math.max(this.impact, 0.6);
+    this.hud.banner(r.name.toUpperCase(), 'floor', 3);
+    this.hud.toast(r.name, r.desc, r.color);
+    this.addEffect(new Shockwave(this, this.player.pos, 8, r.color, 0.8));
+    this.glow.burst(this.player.pos.clone().setY(this.player.pos.y + 1), 80, () => ({
+      vel: new THREE.Vector3(rand(-6, 6), rand(1, 8), rand(-6, 6)), life: rand(0.6, 1.4), size: rand(0.05, 0.12), color: r.color, drag: 2,
+    }));
+  }
+
+  /** The Holy Mantle takes a blow. */
+  onMantleBreak() {
+    const p = this.player;
+    this.audio.play('angel');
+    this.flash = Math.max(this.flash, 0.5);
+    this.addEffect(new Shockwave(this, p.pos, 4, 0xfff0c0, 0.5));
+    this.glow.burst(p.eyePosition, 40, () => ({ vel: new THREE.Vector3(rand(-4, 4), rand(-1, 4), rand(-4, 4)), life: rand(0.4, 0.8), size: 0.07, color: 0xfff0c0, drag: 2 }));
+    this.hud.callout('Mantle', 'gold');
+  }
+
   /** How loud the war drums should be: 0 exploring, 1 in a fight, 2 against a guardian. */
   musicLevel() {
     if (this.state === 'dead' || this.mode !== 'run' || !this.room || this.realm) return 0;
@@ -950,6 +977,7 @@ class Game {
     this.fovKick = -8;
     p.viewmodel.kick(0.7);
     p.fx.onHit(e, dmg, 'riposte');
+    p.fx.fire('execute', { e });
     p.addUltCharge(dmg * 0.15);
     this.hud.damageNumber(c, dmg, 'crit');
     this.gore.spray(e.pos, dir, 2.2, e.bloodColor, e.chamber.world);
@@ -987,6 +1015,7 @@ class Game {
   /** Slipped a blow at the last instant: time slows, and a ghost of you takes the hit. */
   onPerfectDodge(attacker) {
     const p = this.player;
+    p.fx.fire('perfectDodge', { attacker });
     this.slowmo = Math.max(this.slowmo, 0.9);
     this.impact = Math.max(this.impact, 0.7);
     this.audio.play('perfect-dodge');
@@ -1016,6 +1045,7 @@ class Game {
   /** Landing a plunging attack: a crater of force, harder the further you fell. */
   plungeImpact(p, height) {
     const S = p.stats;
+    p.fx.fire('plunge', { height });
     const radius = 2.6 + Math.min(2, height * 0.15);
     const power = 1.4 + Math.min(3, height * 0.18);
     this.addEffect(new Shockwave(this, p.pos, radius + 1.5, 0xffd8a0, 0.45));
@@ -1043,6 +1073,7 @@ class Game {
   }
 
   onFlaskDrunk() {
+    this.player.fx.fire('flask', {});
     this.audio.play('heal');
     this.flash = 0.25;
     this.glow.burst(this.player.pos.clone().setY(this.player.pos.y + 0.8), 24, () => ({
@@ -1252,9 +1283,11 @@ class Game {
 
   onItemPickup(item) {
     const p = this.player;
-    item.apply(p.stats, p);
+    item.apply?.(p.stats, p);
     p.itemCounts.set(item.id, (p.itemCounts.get(item.id) || 0) + 1);
+    if (item.pools.includes('angel')) p.angelDeals = (p.angelDeals || 0) + 1;
     p.hp = Math.min(p.hp, p.stats.maxHp);
+    p.fx.acquire(item);
     p.fx.sync();
     this.audio.play('pickup');
     this.hud.showItem(item);
