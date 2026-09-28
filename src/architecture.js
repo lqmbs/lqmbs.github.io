@@ -5,6 +5,9 @@ import {
   rand, randInt, pick, chance, TAU,
 } from './util.js';
 
+/** Top of a parapet's collision above the ledge it guards: the height of the rail. */
+export const PARAPET_HEIGHT = 1.05;
+
 const _m = new THREE.Matrix4();
 const _t = new THREE.Matrix4();
 
@@ -644,6 +647,7 @@ export class Builder {
   }
 
   // ---- Balustrades grown along every open edge -------------------------------
+  // Collision matches the rail (about waist height): low enough to jump, wide enough to stand on.
 
   parapets({ breakChance = 0.05 } = {}) {
     for (const s of this.world.surfaces) {
@@ -684,7 +688,7 @@ export class Builder {
     const style = s.style === 'rock' ? 'rock' : this.style.parapet;
     const inset = 0.18;
     const pts = run.map((p) => ({ x: p.x - p.nx * inset, z: p.z - p.nz * inset, y: p.y }));
-    for (const p of pts) this.world.addCircle(p.x, p.z, 0.24, p.y - 0.6, p.y + 1.25);
+    for (const p of pts) this.world.addCircle(p.x, p.z, 0.24, p.y - 0.6, p.y + PARAPET_HEIGHT);
 
     if (style === 'menhir') {
       // Standing stones, leaning like old teeth, with a kerb of rubble between.

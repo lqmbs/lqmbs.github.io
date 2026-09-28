@@ -16,7 +16,7 @@ export const CONFIG = {
     radius: 0.4,
     height: 1.8,
     eyeHeight: 1.62,
-    jumpVelocity: 5.4,
+    jumpVelocity: 6.6, // apex ~1.28 m: clears a parapet rail
     jumpCost: 8,
     gravity: 17,
     hurtIframes: 0.45,

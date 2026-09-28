@@ -24,7 +24,7 @@ GitHub Pages also works if you point it at the repository root. Clicking **Enter
 | `W A S D` | Move |
 | Mouse | Look |
 | `Shift` | Sprint (drains stamina) |
-| `Space` | Jump. Jump at a ledge within reach (about 2 m) to haul yourself up; in the air, holding `W` grabs any edge ahead |
+| `Space` | Jump (about 1.3 m: high enough to clear a parapet rail). You can land on and walk along rails, pillar tops and other obstacles. Jump at a ledge within reach (about 2 m) to haul yourself up; in the air, holding `W` grabs any edge ahead |
 | `C` | Dodge, with brief invulnerability. At a sprint: slide |
 | Left click | Attack, or cast with a wand or staff (animation-locked; clicks chain). Hold to charge. Attack a posture-broken or sleeping foe to execute it; attack while falling to plunge |
 | Right click (hold) | Guard |

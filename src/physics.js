@@ -56,6 +56,27 @@ export class World {
     return out;
   }
 
+  /**
+   * The highest obstacle top (parapet, pillar, crate, fence) under a disc of radius `reach` at a
+   * world-space point, no higher than `feetY + tolerance` — so you can land on, and walk along,
+   * things that are not floor. Gates, lift barriers and fog walls don't count.
+   */
+  obstacleTopAt(x, z, feetY, reach = 0.25, tolerance = 0.05) {
+    const lx = x - this.ox, lz = z - this.oz, limit = feetY - this.oy + tolerance;
+    let best = null;
+    for (const c of this.circles) {
+      if (!c.enabled || c.y1 > limit || (best !== null && c.y1 <= best)) continue;
+      const dx = lx - c.x, dz = lz - c.z, rr = c.r + reach;
+      if (dx * dx + dz * dz < rr * rr) best = c.y1;
+    }
+    for (const b of this.boxes) {
+      if (!b.enabled || b.y1 > limit || (best !== null && b.y1 <= best) || b.liftBar || b.liftGuard || b.gateId || b.dynamic) continue;
+      const cx = Math.max(b.x0, Math.min(lx, b.x1)), cz = Math.max(b.z0, Math.min(lz, b.z1));
+      if ((lx - cx) ** 2 + (lz - cz) ** 2 < reach * reach) best = b.y1;
+    }
+    return best === null ? null : best + this.oy;
+  }
+
   /** Does a world-space point sit inside a solid obstacle or block of ground? */
   hitsObstacle(p, minRadius = 0.3) {
     const x = p.x - this.ox, z = p.z - this.oz, y = p.y - this.oy;
@@ -191,7 +212,7 @@ export class World {
   localPushOut(pos, r, feetY, height) {
     const top = feetY + height;
     for (const c of this.circles) {
-      if (!c.enabled || c.y1 < feetY + 0.05 || c.y0 > top) continue;
+      if (!c.enabled || c.y1 < feetY + 0.25 || c.y0 > top) continue;
       const dx = pos.x - c.x, dz = pos.z - c.z;
       const min = c.r + r;
       const d2 = dx * dx + dz * dz;
@@ -201,7 +222,7 @@ export class World {
       pos.z = c.z + (dz / d) * min;
     }
     for (const b of this.boxes) {
-      if (!b.enabled || b.y1 < feetY + 0.05 || b.y0 > top) continue;
+      if (!b.enabled || b.y1 < feetY + 0.25 || b.y0 > top) continue;
       const cx = Math.max(b.x0, Math.min(pos.x, b.x1));
       const cz = Math.max(b.z0, Math.min(pos.z, b.z1));
       let dx = pos.x - cx, dz = pos.z - cz;

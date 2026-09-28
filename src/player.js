@@ -1207,7 +1207,10 @@ export class Player {
 
     this.vel.y -= P.gravity * dt;
     const newY = this.pos.y + this.vel.y * dt;
-    const ground = world.groundAt(this.pos.x, this.pos.z, this.pos.y);
+    // Floor, or the top of whatever you are standing on: a parapet rail, a pillar, a crate.
+    const floorG = world.groundAt(this.pos.x, this.pos.z, this.pos.y);
+    const topG = world.obstacleTopAt(this.pos.x, this.pos.z, this.pos.y, this.radius * 0.6, this.grounded ? 0.25 : 0.05);
+    const ground = topG !== null && (floorG === null || topG > floorG) ? topG : floorG;
     const wasGrounded = this.grounded;
     if (this.state === 'plunge') this.vel.y = Math.min(this.vel.y, -18);
     if (ground !== null && this.vel.y <= 0 && newY <= ground) {
