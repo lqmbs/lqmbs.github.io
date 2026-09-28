@@ -243,7 +243,207 @@ export const COMBAT_LAYOUTS = {
   },
 };
 
+// ---- Old Imperial --------------------------------------------------------------
+
+Object.assign(COMBAT_LAYOUTS, {
+  /** Cloister: a square of arcaded walks around a sunken garden with a fountain. */
+  cloister(b, ch) {
+    const S = rand(11.5, 13), W = rand(4.2, 5), gy = -rand(1.2, 1.8);
+    ch.center = { x: 0, y: gy, z: 0 };
+    const inner = S - W;
+    b.platform(0, -S + W / 2, 2 * S, W, 0);
+    b.platform(0, S - W / 2, 2 * S, W, 0);
+    b.platform(-S + W / 2, 0, W, 2 * inner, 0);
+    b.platform(S - W / 2, 0, W, 2 * inner, 0);
+    b.platform(0, 0, 2 * inner + 0.4, 2 * inner + 0.4, gy, { tag: 'hub', parapet: false, depth: 30 });
+    // Two flights down into the garden, on opposite walks.
+    const axis = chance(0.5);
+    for (const side of [-1, 1]) {
+      const [ax, az] = axis ? [side * (inner + 0.2), rand(-2, 2)] : [rand(-2, 2), side * (inner + 0.2)];
+      const len = Math.abs(gy) * 2.3;
+      const [bx, bz] = axis ? [ax - side * len, az] : [ax, az - side * len];
+      b.stairs(ax, az, bx, bz, 0, gy, 3, { support: false });
+      b.reserve(ax, az, 1.8);
+    }
+    // Fountain.
+    b.add(new THREE.CylinderGeometry(1.7, 1.9, 0.6, 12), b.M.trim, composeMatrix(0, gy + 0.3, 0));
+    b.add(new THREE.CylinderGeometry(1.45, 1.45, 0.05, 12), b.game.materials.crystal, composeMatrix(0, gy + 0.56, 0), { cast: false });
+    b.add(new THREE.CylinderGeometry(0.25, 0.35, 1.8, 8), b.M.stone, composeMatrix(0, gy + 1.2, 0));
+    b.add(new THREE.CylinderGeometry(0.8, 0.3, 0.3, 10), b.M.trim, composeMatrix(0, gy + 2.1, 0));
+    b.world.addCircle(0, 0, 1.9, gy - 1, gy + 2.3);
+    b.lightSpots.push({ kind: 'crystal', pos: new THREE.Vector3(0, gy + 1.2, 0), weight: 2 });
+    // Arcades along the inner edge of each walk.
+    const colH = rand(6, 7.5);
+    for (const [ax, az, bx, bz] of [[-inner, -inner, inner, -inner], [inner, -inner, inner, inner], [inner, inner, -inner, inner], [-inner, inner, -inner, -inner]]) {
+      const n = 4;
+      let prev = null;
+      for (let i = 0; i <= n; i++) {
+        const x = ax + ((bx - ax) * i) / n, z = az + ((bz - az) * i) / n;
+        if (!b.isFree(x, z, 0.5) && !(Math.abs(x) === inner && Math.abs(z) === inner)) { prev = null; continue; }
+        b.pillar(x, z, 0, colH, { r: 0.42 });
+        if (prev) b.arcade(prev[0], prev[1], x, z, colH - 3.4, 3.4, 0.6);
+        prev = [x, z];
+      }
+    }
+    for (let i = 0; i < randInt(2, 4); i++) {
+      const a = rand(0, TAU), r = rand(3, inner - 1.5);
+      const x = Math.cos(a) * r, z = Math.sin(a) * r;
+      if (b.isFree(x, z, 1.2)) b.tree(x, z, gy, rand(0.7, 1), chance(0.5));
+    }
+  },
+
+  /** Basilica: a colonnaded hall with galleried arcades and a raised apse. */
+  basilica(b, ch) {
+    const alongX = chance(0.5);
+    const L = rand(12, 14), H = rand(6, 7);
+    const map = (u, v) => (alongX ? [u, v] : [v, u]);
+    const dims = (du, dv) => (alongX ? [du, dv] : [dv, du]);
+    const end = chance(0.5) ? 1 : -1;
+    ch.center = { x: 0, y: 0, z: 0 };
+    b.platform(0, 0, ...dims(2 * L, 2 * H), 0);
+    const apseY = 1.0;
+    const [ax, az] = map(end * (L + 2.5), 0);
+    b.disc(ax, az, H - 0.6, apseY, { segments: 16, tag: 'dais' });
+    b.stairs(...map(end * (L - 2.6), 0), ...map(end * (L + 0.2), 0), 0, apseY, 3.6, { support: false });
+    b.statue(...map(end * (L + 5), 0), apseY, alongX ? (end > 0 ? -Math.PI / 2 : Math.PI / 2) : (end > 0 ? Math.PI : 0));
+    b.candles(...map(end * (L + 3), 1.5), apseY, 6);
+    b.candles(...map(end * (L + 3), -1.5), apseY, 6);
+    const colH = rand(8, 10);
+    for (const side of [-1, 1]) {
+      let prev = null;
+      for (let u = -L + 1.5; u <= L - 1.5 + 1e-3; u += 3.4) {
+        const [x, z] = map(u, side * (H - 1));
+        if (!b.isFree(x, z, 0.6)) { prev = null; continue; }
+        b.pillar(x, z, 0, colH, { r: 0.45 });
+        if (prev) {
+          b.arcade(prev[0], prev[1], x, z, colH - 3.5, 3.5, 0.7);
+          b.arcade(prev[0], prev[1], x, z, colH + 0.4, 3, 0.5);
+        }
+        prev = [x, z];
+      }
+    }
+  },
+
+  // ---- Titan-hewn -----------------------------------------------------------------
+
+  /** Henge: rings of trilithons around a sacrificial altar stone. */
+  henge(b, ch) {
+    const r0 = rand(12.5, 14);
+    ch.center = { x: 0, y: 0.45, z: 0 };
+    b.disc(0, 0, r0, 0, { segments: 22 });
+    b.disc(0, 0, 3.4, 0.45, { segments: 10, parapet: false, depth: 2, tag: 'dais' });
+    const M = b.M;
+    b.add(worldBoxGeometry(2.4, 0.8, 1.2), M.rock, composeMatrix(0, 0.85, -1.2, 0, rand(-0.2, 0.2)));
+    b.world.addBox(-1.2, -1.8, 1.2, -0.6, 0, 1.3);
+    b.reserve(0, -1.2, 1.4);
+    b.lightSpots.push({ kind: 'crystal', pos: new THREE.Vector3(0, 1.8, -1.2), weight: 2 });
+    const trilithon = (a, r, h) => {
+      const cx = Math.cos(a) * r, cz = Math.sin(a) * r;
+      const tx = -Math.sin(a) * 1.3, tz = Math.cos(a) * 1.3;
+      if (!b.isFree(cx + tx, cz + tz, 0.8) || !b.isFree(cx - tx, cz - tz, 0.8)) return;
+      b.pillar(cx + tx, cz + tz, 0, h, { r: 0.42 });
+      b.pillar(cx - tx, cz - tz, 0, h, { r: 0.42 });
+      b.add(worldBoxGeometry(3.9, 0.9, 1.1), M.rock, composeMatrix(cx, h + 0.95, cz, 0, -a + Math.PI / 2, rand(-0.04, 0.04)));
+    };
+    const n = randInt(7, 9), base = rand(0, TAU);
+    for (let i = 0; i < n; i++) trilithon(base + (i / n) * TAU, r0 - 2.2, rand(4.2, 5.2));
+    for (let i = 0; i < 5; i++) trilithon(base + 0.3 + (i / 5) * TAU * 0.8, 6.8, rand(5.8, 6.8));
+    for (let i = 0; i < randInt(3, 6); i++) {
+      const p = b.randomSpot(['hub'], 1, 1.5);
+      if (p) b.add(worldBoxGeometry(rand(2.5, 3.8), 0.9, 1), M.rock, composeMatrix(p.x, p.y + 0.3, p.z, rand(-0.1, 0.1), rand(0, TAU), 1.4 + rand(-0.1, 0.1)));
+    }
+  },
+
+  /** Ziggurat: a stepped temple mount climbed by broad stairs, the prize at its crown. */
+  ziggurat(b, ch) {
+    const t0 = rand(12, 13), rise = rand(1.5, 1.8);
+    const tiers = [t0, t0 * 0.62, t0 * 0.27];
+    tiers.forEach((hs, i) => b.platform(0, 0, hs * 2, hs * 2, i * rise, { depth: i ? rise + 0.4 : 45, tag: 'hub', corbels: i === 0 }));
+    ch.center = { x: 0, y: rise * 2, z: 0 };
+    const axis = chance(0.5);
+    const len = rise * 1.9;
+    for (let i = 0; i < 2; i++) {
+      for (const side of [-1, 1]) {
+        const inner = tiers[i + 1] - 0.3, outer = tiers[i + 1] + len;
+        const lat = rand(-1, 1);
+        const [ax, az] = axis ? [side * outer, lat] : [lat, side * outer];
+        const [bx, bz] = axis ? [side * inner, lat] : [lat, side * inner];
+        b.stairs(ax, az, bx, bz, i * rise, (i + 1) * rise, 3.4, { support: false });
+      }
+    }
+    // Obelisks at the corners of the lower terrace, braziers on the middle one.
+    for (const [sx, sz] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+      const x = sx * (t0 - 1.6), z = sz * (t0 - 1.6);
+      if (b.isFree(x, z, 1)) {
+        b.add(GEO_OBELISK, b.M.rock, composeMatrix(x, 0, z, 0, Math.PI / 4, 0, 0.8, rand(6, 9), 0.8));
+        b.world.addCircle(x, z, 0.8, -1, 9);
+        b.reserve(x, z, 1);
+      }
+      const bx = sx * (tiers[1] - 1.2), bz = sz * (tiers[1] - 1.2);
+      if (chance(0.7) && b.isFree(bx, bz, 0.6)) b.brazier(bx, bz, rise);
+    }
+  },
+});
+
+const GEO_OBELISK = new THREE.CylinderGeometry(0.25, 0.7, 1, 4).translate(0, 0.5, 0);
+
 export const SPECIAL_LAYOUTS = {
+  /** The merchant's bazaar: rugs, a patched canopy, crates of curios and hanging lamps. */
+  bazaar(b, ch) {
+    ch.center = { x: 0, y: 0, z: 0 };
+    ch.enclosed = false;
+    b.disc(0, 0, 9, 0, { segments: 20 });
+    const entry = Object.keys(DIRS).find((d) => ch.neighbors[d]) ?? 's';
+    const back = DIRS[entry].opposite;
+    const [mx, mz] = along(back, 3.4);
+    const d = DIRS[entry];
+    ch.shopSpot = { x: mx, z: mz, facing: Math.atan2(d.x, d.z) };
+    b.reserve(mx, mz, 1.6);
+    const M = b.M;
+    const rugs = [b.game.materials.cloth, b.game.materials.goldCloth, b.game.materials.arcaneCloth];
+    for (let i = 0; i < 4; i++) {
+      const [rx, rz] = along(back, rand(-2, 3.5), rand(-3.5, 3.5));
+      b.add(new THREE.BoxGeometry(rand(1.8, 3), 0.03, rand(1.2, 2)), pick(rugs), composeMatrix(rx, 0.015 + i * 0.004, rz, 0, rand(0, TAU)), { cast: false });
+    }
+    // Canopy on four crooked poles over the merchant.
+    const lat = latOf(back);
+    const poles = [];
+    for (const [a, l] of [[0.9, -3.7], [0.9, 3.7], [5.6, -2.8], [5.6, 2.8]]) {
+      const [px, pz] = along(back, a, l);
+      b.add(new THREE.CylinderGeometry(0.08, 0.1, 4.6, 5), M.bark || b.game.materials.bark, composeMatrix(px, 2.3, pz, rand(-0.05, 0.05), 0, rand(-0.05, 0.05)));
+      b.world.addCircle(px, pz, 0.2, -1, 4.6);
+      poles.push([px, pz]);
+    }
+    const [cx, cz] = along(back, 3.3);
+    b.add(new THREE.ConeGeometry(3.9, 1.6, 4, 1, true), b.game.materials.arcaneCloth, composeMatrix(cx, 5.6, cz, 0, Math.PI / 4 + Math.atan2(lat.x, lat.z), 0, 1, 1, 0.75), { cast: true });
+    for (const [px, pz] of poles) {
+      b.add(new THREE.BoxGeometry(0.06, 1.1, 0.06), M.iron, composeMatrix(px, 3.9, pz));
+      b.add(new THREE.BoxGeometry(0.22, 0.3, 0.22), b.game.materials.arcane, composeMatrix(px, 3.3, pz), { cast: false, receive: false });
+      b.lightSpots.push({ kind: 'warm', color: 0xc090ff, pos: new THREE.Vector3(px, 3.3, pz), weight: 1.5, intensity: 5, distance: 8 });
+    }
+    // Crates, barrels, piles of junk and candles around the rim.
+    for (let i = 0; i < 9; i++) {
+      const p = b.rimSpot(['hub'], 0.8, 1.2);
+      if (!p) continue;
+      if (chance(0.5)) {
+        const s = rand(0.6, 1);
+        b.add(new THREE.BoxGeometry(s, s, s), b.game.materials.bark, composeMatrix(p.x, p.y + s / 2, p.z, 0, rand(0, TAU)));
+        if (chance(0.5)) b.add(new THREE.BoxGeometry(s * 0.7, s * 0.7, s * 0.7), b.game.materials.bark, composeMatrix(p.x, p.y + s * 1.35, p.z, 0, rand(0, TAU)));
+        b.world.addCircle(p.x, p.z, s * 0.7, p.y - 1, p.y + s * 2);
+      } else {
+        b.add(new THREE.CylinderGeometry(0.35, 0.35, 0.9, 8), b.game.materials.bark, composeMatrix(p.x, p.y + 0.45, p.z));
+        b.add(new THREE.CylinderGeometry(0.37, 0.37, 0.06, 8), M.iron, composeMatrix(p.x, p.y + 0.7, p.z));
+        b.world.addCircle(p.x, p.z, 0.45, p.y - 1, p.y + 1);
+      }
+      b.reserve(p.x, p.z, 0.9);
+    }
+    for (let i = 0; i < 4; i++) {
+      const p = b.randomSpot(['hub'], 0.5);
+      if (p) b.candles(p.x, p.z, p.y, randInt(3, 6));
+    }
+    b.lightShaft(mx, mz, 0, 1.2);
+  },
+
   /** Starting shrine: a round sanctum with a sword planted in embers. */
   shrine(b, ch) {
     ch.center = { x: 0, y: 0, z: 0 };

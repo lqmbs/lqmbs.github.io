@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { ARCH_STYLES } from './config.js';
 import {
   GeoBatch, composeMatrix, worldBoxGeometry, scaleUV, archWallGeometry,
   rand, randInt, pick, chance, TAU,
@@ -17,6 +18,8 @@ const GEO = {
   rock: new THREE.DodecahedronGeometry(1, 0),
   ico: new THREE.IcosahedronGeometry(1, 1),
   cube: new THREE.BoxGeometry(1, 1, 1),
+  drum: new THREE.CylinderGeometry(1, 1, 1, 12),
+  dome: new THREE.SphereGeometry(1, 10, 6, 0, TAU, 0, Math.PI / 2),
 };
 
 /**
@@ -37,7 +40,11 @@ export class Builder {
     this.shafts = [];
     this.grass = [];
     this.biome = chamber.floor?.biome ?? { id: 'crystal' };
+    this.style = chamber.floor?.style ?? ARCH_STYLES.gothic;
   }
+
+  /** The material a platform's flanks are built from in this floor's style. */
+  get sideMat() { return this.style.side === 'rock' ? this.M.rock : this.M.brick; }
 
   add(geo, mat, matrix, opts) { this.batch.add(geo, mat, matrix, opts); }
 
@@ -105,25 +112,52 @@ export class Builder {
   /** A rectangular platform: a stone tower whose top is the floor, sinking into the abyss. */
   platform(cx, cz, w, d, y, { angle = 0, depth = 45, parapet = true, tag = 'hub', style = 'balustrade', corbels = true } = {}) {
     const M = this.M;
-    this.add(worldBoxGeometry(w, depth, d), M.brick, composeMatrix(cx, y - 0.35 - depth / 2, cz, 0, angle));
+    this.add(worldBoxGeometry(w, depth, d), this.sideMat, composeMatrix(cx, y - 0.35 - depth / 2, cz, 0, angle));
     this.add(worldBoxGeometry(w, 0.35, d, 8), M.floor, composeMatrix(cx, y - 0.175, cz, 0, angle));
     this.add(worldBoxGeometry(w + 0.35, 0.35, d + 0.35), M.trim, composeMatrix(cx, y - 0.55, cz, 0, angle));
-    if (corbels && depth > 6) {
-      this.add(worldBoxGeometry(w + 0.2, 0.3, d + 0.2), M.trim, composeMatrix(cx, y - 3.2, cz, 0, angle));
-      this.add(worldBoxGeometry(w + 0.5, 0.6, d + 0.5), M.trim, composeMatrix(cx, y - 9, cz, 0, angle));
-    }
+    if (corbels && depth > 6) this.flankDetail(cx, cz, y, (hw) => worldBoxGeometry(w + hw, 0.3, d + hw), angle, w, d);
     return this.world.addRect(cx, cz, w / 2, d / 2, y, { angle, thick: depth, parapet, tag, style });
+  }
+
+  /** Mouldings down a platform's flank, in the floor's style. */
+  flankDetail(cx, cz, y, ringGeo, angle = 0, w = 0, d = 0, r = 0) {
+    const M = this.M;
+    switch (this.style.id) {
+      case 'imperial':
+        // A dentilled cornice and a deep string course.
+        this.add(ringGeo(0.5), M.trim, composeMatrix(cx, y - 1.0, cz, 0, angle));
+        this.add(ringGeo(0.25), M.stone, composeMatrix(cx, y - 1.35, cz, 0, angle, 0, 1, 1.6, 1));
+        this.add(ringGeo(0.6), M.trim, composeMatrix(cx, y - 6, cz, 0, angle, 0, 1, 2, 1));
+        break;
+      case 'cyclopean': {
+        // Unmortared boulders bulging out of the flanks.
+        const n = randInt(3, 6);
+        for (let i = 0; i < n; i++) {
+          const a = rand(0, TAU);
+          const ex = r ? Math.cos(a) * r : rand(-w / 2, w / 2), ez = r ? Math.sin(a) * r : (chance(0.5) ? 1 : -1) * d / 2;
+          const [lx, lz] = r ? [ex, ez] : chance(0.5) ? [ex, ez] : [(chance(0.5) ? 1 : -1) * w / 2, rand(-d / 2, d / 2)];
+          const ca = Math.cos(angle), sa = Math.sin(angle);
+          const sc = rand(0.9, 1.8);
+          this.add(GEO.rock, M.rock, composeMatrix(cx + lx * ca + lz * sa, y - rand(1.2, 5), cz - lx * sa + lz * ca, rand(0, 3), rand(0, 3), 0, sc, sc * rand(0.8, 1.4), sc), { cast: false });
+        }
+        this.add(ringGeo(0.4), M.rock, composeMatrix(cx, y - 1.1, cz, 0, angle, 0, 1, 2.2, 1));
+        break;
+      }
+      default:
+        this.add(ringGeo(0.2), M.trim, composeMatrix(cx, y - 3.2, cz, 0, angle));
+        this.add(ringGeo(0.5), M.trim, composeMatrix(cx, y - 9, cz, 0, angle, 0, 1, 2, 1));
+    }
   }
 
   disc(cx, cz, r, y, { depth = 45, parapet = true, tag = 'hub', style = 'balustrade', segments = 20 } = {}) {
     const M = this.M;
     const circ = TAU * r;
     const col = scaleUV(new THREE.CylinderGeometry(r, r * 0.92, depth, segments, 1, true), circ / 4, depth / 4);
-    this.add(col, M.brick, composeMatrix(cx, y - 0.35 - depth / 2, cz));
+    this.add(col, this.sideMat, composeMatrix(cx, y - 0.35 - depth / 2, cz));
     const cap = scaleUV(new THREE.CylinderGeometry(r, r, 0.35, segments), (r * 2) / 8);
     this.add(cap, M.floor, composeMatrix(cx, y - 0.175, cz));
     this.add(new THREE.CylinderGeometry(r + 0.18, r + 0.18, 0.35, segments), M.trim, composeMatrix(cx, y - 0.55, cz));
-    if (depth > 6) this.add(new THREE.CylinderGeometry(r + 0.3, r + 0.3, 0.6, segments), M.trim, composeMatrix(cx, y - 8, cz));
+    if (depth > 6) this.flankDetail(cx, cz, y, (g) => new THREE.CylinderGeometry(r + g, r + g, 0.3, segments), 0, 0, 0, r);
     return this.world.addDisc(cx, cz, r, y, { thick: depth, parapet, tag, style });
   }
 
@@ -149,7 +183,7 @@ export class Builder {
     const ang = Math.atan2(bx - ax, bz - az);
     const cx = (ax + bx) / 2, cz = (az + bz) / 2;
     this.add(worldBoxGeometry(width, 0.35, len, 8), M.floor, composeMatrix(cx, y - 0.175, cz, 0, ang));
-    this.add(worldBoxGeometry(width + 0.3, 0.9, len), M.brick, composeMatrix(cx, y - 0.8, cz, 0, ang));
+    this.add(worldBoxGeometry(width + 0.3, 0.9, len), this.sideMat, composeMatrix(cx, y - 0.8, cz, 0, ang));
     this.add(worldBoxGeometry(width + 0.45, 0.25, len), M.trim, composeMatrix(cx, y - 0.4, cz, 0, ang));
     if (arches && len > 5) {
       const spans = Math.max(1, Math.round(len / 7));
@@ -160,13 +194,13 @@ export class Builder {
         const c = -len / 2 + spanLen * (i + 0.5);
         arcs.push({ cx: c, halfW: spanLen / 2 - 0.7, spring: archH * 0.45, peak: archH * 0.92 });
       }
-      const wall = archWallGeometry(len, archH, width * 0.8, arcs);
+      const wall = archWallGeometry(len, archH, width * 0.8, arcs, this.style.arch);
       // archWallGeometry runs along local X; rotate so it follows the bridge.
-      this.add(wall, M.brick, composeMatrix(cx, y - 1.2 - archH, cz, 0, ang + Math.PI / 2));
+      this.add(wall, this.sideMat, composeMatrix(cx, y - 1.2 - archH, cz, 0, ang + Math.PI / 2));
       for (let i = 0; i <= spans; i++) {
         const t = -len / 2 + spanLen * i;
         const px = cx + Math.sin(ang) * t, pz = cz + Math.cos(ang) * t;
-        if (i > 0 && i < spans) this.add(worldBoxGeometry(width * 0.9, 40, 1.3), M.brick, composeMatrix(px, y - 1.2 - archH - 20, pz, 0, ang));
+        if (i > 0 && i < spans) this.add(worldBoxGeometry(width * 0.9, 40, 1.3), this.sideMat, composeMatrix(px, y - 1.2 - archH - 20, pz, 0, ang));
       }
     }
     return this.world.addRect(cx, cz, width / 2, len / 2, y, { angle: ang, thick: 1.4, parapet, tag });
@@ -194,7 +228,7 @@ export class Builder {
       this.add(worldBoxGeometry(0.3, 0.5, Math.hypot(len, y1 - y0)), M.trim,
         composeMatrix(cx + ox, (y0 + y1) / 2 - 0.1, cz + oz, -slope, ang));
     }
-    if (support) this.add(worldBoxGeometry(width, 30, len), M.brick, composeMatrix(cx, low - 0.6 - 15, cz, 0, ang));
+    if (support) this.add(worldBoxGeometry(width, 30, len), this.sideMat, composeMatrix(cx, low - 0.6 - 15, cz, 0, ang));
     const hd = len / 2;
     return this.world.addRamp(cx, cz, width / 2, hd, y0, y1, { angle: ang, thick: support ? 30 : 1 });
   }
@@ -202,6 +236,8 @@ export class Builder {
   // ---- Gothic details ------------------------------------------------------
 
   pillar(x, z, y, h, { style = pick(['octagon', 'cluster', 'octagon']), r = 0.5, collide = true } = {}) {
+    if (this.style.pillar === 'drum') return this.drumColumn(x, z, y, h, r, collide);
+    if (this.style.pillar === 'monolith') return this.monolith(x, z, y, h, r, collide);
     const M = this.M;
     const base = composeMatrix(x, y, z);
     this.part(GEO.cube, M.trim, base, 0, 0.3, 0, r * 2.8, 0.6, r * 2.8);
@@ -221,12 +257,44 @@ export class Builder {
     this.reserve(x, z, r * 1.5);
   }
 
-  /** A pointed arch spanning between two points, its bottom at `bottomY`. */
+  /** Imperial column: plinth, a fluted round drum shaft, and a cushion capital with an abacus. */
+  drumColumn(x, z, y, h, r, collide) {
+    const M = this.M;
+    const base = composeMatrix(x, y, z);
+    this.part(GEO.cube, M.trim, base, 0, 0.3, 0, r * 3, 0.6, r * 3);
+    this.part(GEO.drum, M.stone, base, 0, 0.75, 0, r * 1.25, 0.3, r * 1.25);
+    const shaftH = h - 2;
+    this.add(scaleUV(GEO.drum.clone(), 2, shaftH / 4), M.brick, _m.multiplyMatrices(base, composeMatrix(0, 0.9 + shaftH / 2, 0, 0, 0, 0, r * 0.95, shaftH, r * 0.95)).clone());
+    for (let k = 1; k < 4; k++) this.part(GEO.drum, M.trim, base, 0, 0.9 + (shaftH * k) / 4, 0, r * 1.0, 0.08, r * 1.0);
+    this.part(GEO.drum, M.stone, base, 0, 0.9 + shaftH + 0.2, 0, r * 1.35, 0.4, r * 1.35);
+    this.part(GEO.cube, M.trim, base, 0, 0.9 + shaftH + 0.6, 0, r * 3, 0.4, r * 3);
+    if (collide) this.world.addCircle(x, z, r * 1.35, y - 1, y + h);
+    this.reserve(x, z, r * 1.5);
+  }
+
+  /** Titan-hewn monolith: rough slabs stacked askew, crowned with a capstone. */
+  monolith(x, z, y, h, r, collide) {
+    const M = this.M;
+    let yy = y;
+    const n = Math.max(2, Math.round(h / 3.4));
+    const seg = h / n;
+    for (let i = 0; i < n; i++) {
+      const w = r * rand(2.2, 2.9) * (1 - i * 0.06);
+      this.add(worldBoxGeometry(w, seg * 0.96, w * rand(0.8, 1.05)), M.rock,
+        composeMatrix(x + rand(-0.08, 0.08), yy + seg / 2, z + rand(-0.08, 0.08), rand(-0.03, 0.03), rand(0, TAU), rand(-0.03, 0.03)));
+      yy += seg;
+    }
+    this.add(worldBoxGeometry(r * 3.6, 0.8, r * 3.2), M.trim, composeMatrix(x, yy + 0.4, z, 0, rand(0, TAU)));
+    if (collide) this.world.addCircle(x, z, r * 1.45, y - 1, y + h);
+    this.reserve(x, z, r * 1.7);
+  }
+
+  /** An arch spanning between two points in the floor's style, its bottom at `bottomY`. */
   arcade(ax, az, bx, bz, bottomY, height, thickness = 0.7) {
     const len = Math.hypot(bx - ax, bz - az);
     if (len < 1.5) return;
     const ang = Math.atan2(bx - ax, bz - az);
-    const geo = archWallGeometry(len, height, thickness, [{ cx: 0, halfW: len / 2 - 0.45, spring: height * 0.35, peak: height * 0.82 }]);
+    const geo = archWallGeometry(len, height, thickness, [{ cx: 0, halfW: len / 2 - 0.45, spring: height * 0.35, peak: height * 0.82 }], this.style.arch);
     this.add(geo, this.M.brick, composeMatrix((ax + bx) / 2, bottomY, (az + bz) / 2, 0, ang + Math.PI / 2));
   }
 
@@ -260,11 +328,12 @@ export class Builder {
     if (light) this.lightSpots.push({ kind: 'crystal', pos: new THREE.Vector3(x, y + 1.2 * scale, z), weight: scale });
   }
 
-  tower(x, z, baseY, topY, w, { windows = true, roof = pick(['spire', 'spire', 'crown']), cast = false, windowChance = 0.5 } = {}) {
+  tower(x, z, baseY, topY, w, { windows = true, roof = null, cast = false, windowChance = 0.5 } = {}) {
     const M = this.M;
     const h = topY - baseY;
     const opts = { cast, receive: true };
-    this.add(worldBoxGeometry(w, h, w), M.brick, composeMatrix(x, baseY + h / 2, z), opts);
+    roof ??= { spire: pick(['spire', 'spire', 'crown']), dome: pick(['dome', 'dome', 'crown']), ziggurat: pick(['ziggurat', 'ziggurat', 'crown']) }[this.style.roof];
+    this.add(worldBoxGeometry(w, h, w), this.sideMat, composeMatrix(x, baseY + h / 2, z), opts);
     for (let y = baseY + 6; y < topY - 1; y += rand(5, 9)) this.add(worldBoxGeometry(w + 0.4, 0.4, w + 0.4), M.trim, composeMatrix(x, y, z), opts);
     for (const [bx, bz] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
       this.add(worldBoxGeometry(0.5, h * 0.9, 0.5), M.trim, composeMatrix(x + bx * w * 0.5, baseY + h * 0.45, z + bz * w * 0.5), opts);
@@ -280,7 +349,19 @@ export class Builder {
         }
       }
     }
-    if (roof === 'spire') {
+    if (roof === 'dome') {
+      this.add(worldBoxGeometry(w + 0.5, 0.5, w + 0.5), M.trim, composeMatrix(x, topY + 0.25, z), opts);
+      this.add(GEO.drum, M.brick, composeMatrix(x, topY + 0.9, z, 0, 0, 0, w * 0.45, 0.9, w * 0.45), opts);
+      this.add(GEO.dome, M.trim, composeMatrix(x, topY + 1.35, z, 0, 0, 0, w * 0.47, w * 0.42, w * 0.47), opts);
+      this.add(GEO.cone6, M.trim, composeMatrix(x, topY + 1.35 + w * 0.42 + 0.3, z, 0, 0, 0, 0.18, 0.6, 0.18), opts);
+    } else if (roof === 'ziggurat') {
+      let yy = topY, ww = w;
+      for (let i = 0; i < 3; i++) {
+        ww *= 0.72;
+        this.add(worldBoxGeometry(ww, 0.9, ww), i % 2 ? M.trim : M.rock, composeMatrix(x, yy + 0.45, z), opts);
+        yy += 0.9;
+      }
+    } else if (roof === 'spire') {
       const rh = w * rand(1.4, 2.6);
       this.add(GEO.cone4, M.trim, composeMatrix(x, topY + rh / 2, z, 0, Math.PI / 4, 0, w * 0.75, rh, w * 0.75), opts);
       for (const [bx, bz] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
@@ -512,8 +593,8 @@ export class Builder {
 
   /** Freestanding gothic arch framing a walkway. */
   archway(x, z, y, ang, w = 4, h = 5.5) {
-    const geo = archWallGeometry(w + 1.4, h, 0.8, [{ cx: 0, halfW: w / 2, spring: h * 0.5, peak: h * 0.88 }]);
-    this.add(geo, this.M.brick, composeMatrix(x, y, z, 0, ang));
+    const geo = archWallGeometry(w + 1.4, h, 0.8, [{ cx: 0, halfW: w / 2, spring: h * 0.5, peak: h * 0.88 }], this.style.arch);
+    this.add(geo, this.sideMat, composeMatrix(x, y, z, 0, ang));
     for (const s of [-1, 1]) this.world.addCircle(x + Math.cos(ang) * s * (w / 2 + 0.35), z - Math.sin(ang) * s * (w / 2 + 0.35), 0.45, y - 1, y + h);
   }
 
@@ -599,10 +680,26 @@ export class Builder {
   parapetRun(s, run) {
     if (run.length < 2) return;
     const M = this.M;
-    const style = s.style;
+    const style = s.style === 'rock' ? 'rock' : this.style.parapet;
     const inset = 0.18;
     const pts = run.map((p) => ({ x: p.x - p.nx * inset, z: p.z - p.nz * inset, y: p.y }));
     for (const p of pts) this.world.addCircle(p.x, p.z, 0.24, p.y - 0.6, p.y + 1.25);
+
+    if (style === 'menhir') {
+      // Standing stones, leaning like old teeth, with a kerb of rubble between.
+      for (let k = 0; k < pts.length; k++) {
+        const p = pts[k];
+        if (k % 3 === 0) {
+          const h = rand(0.9, 1.8);
+          this.add(worldBoxGeometry(rand(0.35, 0.55), h, rand(0.3, 0.45)), M.rock,
+            composeMatrix(p.x, p.y + h / 2 - 0.1, p.z, rand(-0.12, 0.12), rand(0, TAU), rand(-0.12, 0.12)));
+        } else if (chance(0.6)) {
+          const sc = rand(0.18, 0.32);
+          this.add(GEO.rock, M.rock, composeMatrix(p.x, p.y + sc * 0.4, p.z, rand(0, 3), rand(0, 3), 0, sc, sc * 0.8, sc));
+        }
+      }
+      return;
+    }
 
     if (style === 'rock') {
       for (let k = 0; k < pts.length; k += 2) {
@@ -621,6 +718,17 @@ export class Builder {
       const ang = Math.atan2(q.x - p.x, q.z - p.z);
       const mx = (p.x + q.x) / 2, mz = (p.z + q.z) / 2, my = (p.y + q.y) / 2;
       const pitch = -Math.atan2(q.y - p.y, len);
+      if (style === 'crenel') {
+        // A solid breastwork topped with merlons.
+        this.add(worldBoxGeometry(0.5, 0.75, len + 0.3), M.brick, composeMatrix(mx, my + 0.37, mz, pitch, ang));
+        this.add(worldBoxGeometry(0.62, 0.12, len + 0.35), M.trim, composeMatrix(mx, my + 0.8, mz, pitch, ang));
+        const merlons = Math.max(1, Math.round(len / 1.1));
+        for (let k = 0; k < merlons; k++) {
+          const t = (k + 0.5) / merlons;
+          this.add(GEO.cube, M.brick, composeMatrix(p.x + (q.x - p.x) * t, p.y + (q.y - p.y) * t + 1.1, p.z + (q.z - p.z) * t, 0, ang, 0, 0.5, 0.5, 0.55));
+        }
+        continue;
+      }
       this.add(worldBoxGeometry(0.42, 0.25, len + 0.3), M.trim, composeMatrix(mx, my + 0.12, mz, pitch, ang));
       this.add(worldBoxGeometry(0.36, 0.14, len + 0.3), M.trim, composeMatrix(mx, my + 0.95, mz, pitch, ang));
       const posts = Math.max(1, Math.round(len / 0.45));

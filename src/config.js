@@ -65,6 +65,26 @@ export const BIOMES = {
   },
 };
 
+/**
+ * Architecture. Every floor of an expedition is raised in a different style, so the shapes of
+ * the place change as well as its palette: arches, columns, balustrades, roofs, and which
+ * chamber archetypes appear.
+ */
+export const ARCH_STYLES = {
+  gothic: {
+    id: 'gothic', name: 'Gothic', arch: 'pointed', pillar: 'gothic', parapet: 'balustrade', roof: 'spire', side: 'brick',
+    tint: 0xffffff, layouts: ['nave', 'ring', 'terraces', 'causeway', 'grotto', 'spires'],
+  },
+  imperial: {
+    id: 'imperial', name: 'Old Imperial', arch: 'round', pillar: 'drum', parapet: 'crenel', roof: 'dome', side: 'brick',
+    tint: 0xfff0dc, layouts: ['cloister', 'basilica', 'terraces', 'causeway', 'ring', 'nave'],
+  },
+  cyclopean: {
+    id: 'cyclopean', name: 'Titan-Hewn', arch: 'corbel', pillar: 'monolith', parapet: 'menhir', roof: 'ziggurat', side: 'rock',
+    tint: 0xe4e6ea, layouts: ['henge', 'ziggurat', 'grotto', 'causeway', 'spires', 'terraces'],
+  },
+};
+
 export const DIRS = {
   n: { dx: 0, dy: -1, x: 0, z: -1, opposite: 's' },
   s: { dx: 0, dy: 1, x: 0, z: 1, opposite: 'n' },

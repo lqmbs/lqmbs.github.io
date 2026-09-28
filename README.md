@@ -13,7 +13,9 @@ python3 -m http.server 8000
 # then open http://localhost:8000
 ```
 
-GitHub Pages also works if you point it at the repository root. Clicking **Descend** captures the mouse (pointer lock). Press `Esc` to release it and pause.
+GitHub Pages also works if you point it at the repository root. Clicking **Enter the Hold** captures the mouse (pointer lock). Press `Esc` to release it and pause.
+
+**Settings** (on the title and pause screens, saved in your browser): camera sensitivity, field of view, invert look, and mouse smoothing. Mouse input uses raw (unaccelerated) pointer-lock motion where the browser supports it, and drops the occasional wild jump some browsers report, which used to spin the camera.
 
 ## Controls
 
@@ -26,8 +28,9 @@ GitHub Pages also works if you point it at the repository root. Clicking **Desce
 | Left click | Attack, or cast with a wand or staff (animation-locked; clicks chain) |
 | Right click (hold) | Guard |
 | `Q` | Class skill |
+| `R` | Ultimate (when charged) |
 | `F` | Drink a Crimson Flask (heals 40%, refilled each floor) |
-| `E` | Interact: take a weapon, rest at the table, ring the effigy, begin an expedition |
+| `E` | Interact: take a weapon, open a chest, unlock a gate, trade, accept a deal, rest at the table, begin an expedition |
 | `1 2 3` / mouse wheel | Switch weapon slots |
 | `G` | Drop the weapon in hand |
 | `Tab` | Inventory |
@@ -48,11 +51,13 @@ Dying in the sparring ground just sends you back to the table. On an expedition,
 
 ## Classes
 
-| Class | Kit | Passive | Skill (Q) |
-| --- | --- | --- | --- |
-| Vigil Knight | Longsword & kite shield | Wider parry window; the shield blocks almost everything | **Shield Bash**: lunges and staggers, and can hurl foes off ledges |
-| Duelist | Twin daggers | Ripostes +40%; fastest on foot | **Sidestep**: a short dash in any direction with invincibility frames |
-| Lantern Mage | Ember Wand & lantern | Mana well for spells; brighter lantern | **Lantern Flare**: blinds, staggers and ignites everything nearby |
+| Class | Kit | Passive | Skill (Q) | Ultimate (R) |
+| --- | --- | --- | --- | --- |
+| Vigil Knight | Longsword & kite shield | Wider parry window; the shield blocks almost everything | **Shield Bash**: lunges and staggers, and can hurl foes off ledges | **Oath of the Vigil**: leap and drive the sword down; a shockwave breaks every guard nearby, then an aegis halves all harm for 8 s |
+| Duelist | Twin daggers | Ripostes +40%; fastest on foot | **Sidestep**: a short dash in any direction with invincibility frames | **Thousand Cuts**: time bends; blink between up to seven foes, cutting each like a riposte |
+| Lantern Mage | Ember Wand & lantern | Mana well for spells; brighter lantern | **Lantern Flare**: blinds, staggers and ignites everything nearby | **Sunfall**: a captive sun crashes where you look, burning everything; mana is boundless for 6 s |
+
+The ultimate charges as you fight: damage dealt, parries and kills all feed the gauge beside the skill slot, which glows when it is ready.
 
 ## Weapons & inventory
 
@@ -65,6 +70,59 @@ Nightreign-style: three weapon slots, flasks and relics. Everything is lost when
 - Floating damage numbers show every hit.
 
 An expedition is three floors. Clearing the third guardian brings you home.
+
+## Coin, keys and chests
+
+- **Coin** falls from the slain and spills from chests; walk over it. It buys wares from the merchant.
+- **Keys** drop now and then, lie in chests, come from elites, and are sold by the merchant. A key opens a **gilded chest** or the **treasury's locked gate** (from floor II on).
+- **Chests**: weathered chests open freely and hold coin, keys, blood vials or a weapon. Gilded chests need a key and always hold a relic or a rare weapon.
+- **Blood vials** restore a little health when you walk over them.
+- Clearing a fighting chamber raises one reward, Isaac-style: a relic on a pedestal, a chest, or a scatter of coin, keys and blood.
+
+## The merchant
+
+Every floor has a quiet chamber where **Vael the Many-Handed** floats over a glyph: hooded, masked, four-armed, forever juggling, with a third eye that opens to judge your purse. He greets you as you approach and talks while you browse.
+
+Press `E` to trade. The camera drifts to frame him and his wares, which stand on real velvet stands in the world with price tags. The ledger on the right, the tags and brackets anchored to each ware, and his speech bubble all work together: browse with `A`/`D`, the mouse, or by pointing at a ware in the world. He points at and watches whatever you are looking at, and reacts to what happens: delight and a coin shower when you buy, folded arms and a wagging finger when you can't pay, and a bow when you leave. He sells two relics, a weapon, a key, and a blood vial or flask refill.
+
+## Deals with the devil, and with angels
+
+When a guardian falls, something may notice. Winning without taking a hit makes it likelier.
+
+- **Devil deals**: a horned idol rises from the arena floor, flanked by black braziers, offering two powerful relics. Each costs **maximum vigor**, not coin.
+- **Angel deals**: a winged saint descends in a column of light, offering two gifts for free. Take one and the other fades. Anyone who has already signed a devil's pact never sees an angel again.
+
+## Relics that change your build
+
+Alongside the stat relics, many change how you fight:
+
+| Relic | Effect |
+| --- | --- |
+| Stormcaller's Chime | Hits may arc lightning to two nearby foes |
+| Drowned Mirror | Parries burst outward, staggering everything nearby |
+| Cinder Heart | Your strikes set foes ablaze |
+| Gargoyle's Wing | Jump again in mid-air |
+| Circlet of Hungry Knives | Two spectral knives orbit you, cutting what they touch |
+| Corpse Bloom | The slain burst, wounding foes nearby |
+| Soul Siphon | Kills restore health and mana |
+| Crescent Sigil | At full health, swings loose a piercing crescent of light |
+| Hound's Collar | After a parry, attack 50% faster for 3 s |
+| Kindled Crown | Ultimate charges 50% faster |
+| Hourglass of Grave-Sand | Class skill recovers 35% faster |
+| Saint's Knuckle | Parries mend health |
+| Berserker's Tooth | Below 35% health, deal 60% more damage |
+| Miser's Purse *(shop)* | Foes drop twice the coin |
+| Ashen Flask | One more Crimson Flask |
+| Pact of Brimstone *(devil)* | Every swing hurls a homing brimstone bolt |
+| Horn of the Goat *(devil)* | Damage ×1.5 and a mid-air jump |
+| Heart of Black Glass *(devil)* | Damage ×2, but you take 60% more harm |
+| The Crimson Crown *(devil)* | Kills heal, strikes drain, ultimate charges faster |
+| Mantle of Hungry Shades *(devil)* | Four shadow blades orbit you |
+| Halo of the Last Saint *(angel)* | A halo over your head smites the nearest foe |
+| Seraph Feather *(angel)* | Mid-air jump, faster feet, and falls cost nothing |
+| Aegis of Mercy *(angel)* | Once per floor, a killing blow leaves you standing |
+| Sanctified Edge *(angel)* | Ripostes ×1.5; parries mend health |
+| Dove of Ash *(angel)* | Max health +40, full heal, one more flask |
 
 ## Combat
 
@@ -101,9 +159,21 @@ An expedition is three floors, each drawn from a different biome:
 | The Ember Fortress | A lava sea (falling costs more) | Red keep, lava cracks, spikes, chains, lava falls | Ember Hound |
 | The Sunlit Ruins | A sea of cloud under a sky | Daylight with sun shadows, grass, trees, mesas | Gargoyle |
 
+**Every floor is built in a different style**, so the architecture changes as well as the palette:
+
+| Style | Arches | Columns | Balustrades | Towers | Signature chambers |
+| --- | --- | --- | --- | --- | --- |
+| Gothic | Pointed | Clustered and octagonal shafts | Balusters | Spires | Nave, ring, spires, grotto |
+| Old Imperial | Round | Banded drum columns with cushion capitals | Crenellated breastworks | Domes | Cloister (arcaded walks round a sunken garden), basilica (galleried arcades and an apse) |
+| Titan-Hewn | Corbelled | Stacked, askew monoliths | Standing stones | Stepped ziggurat crowns | Henge (rings of trilithons around an altar), ziggurat (a stepped temple mount) |
+
 **Floors are seamless.** A floor is an Isaac-style grid of chambers laid out as one continuous world. Neighbouring gatehouses are joined by real bridges and stairs, so you walk from chamber to chamber with no cut or fade. Neighbouring chambers stay visible through the fog, and the background, weather and abyss belong to the floor as a whole.
 
-**Encounters wake as you arrive.** Some foes wait in plain sight, slumped and still, and others claw out of the floor when you step into their chamber. A strike on a sleeping foe is a sneak attack and lands like a riposte. If you leave a chamber and get far away, its foes walk home and wait for you. Clearing a chamber raises a relic pedestal.
+**Encounters wake as you arrive.** Some foes wait in plain sight, slumped and still, and others claw out of the floor when you step into their chamber. A strike on a sleeping foe is a sneak attack and lands like a riposte. If you leave a chamber and get far away, its foes walk home and wait for you. Clearing a chamber raises a reward: a relic, a chest, or a scatter of coin.
+
+**Special chambers announce themselves from outside.** The guardian's gatehouse is hung with skulls, bone horns and crimson banners and lit by blood-red fire. The treasury's is gilded, with a golden crest and gold banners. The merchant's has a coin sign and violet lamps, and elite gates fly banners.
+
+**The map is true to scale.** Chambers are square cells joined by their passages. Your arrow shows your real position and heading and scrolls with you. The guardian (skull), treasury (crown), merchant (coin) and elite (diamond) rooms have their own icons and colours, and chambers still fighting are flagged.
 
 **Only elite and guardian arenas seal.** A curtain of fog closes behind you there. An elite arena holds a *Champion* of the biome's signature breed (bigger, tougher, with a gold aura and a boss bar) and its retinue, and drops a rare weapon when cleared. The guardian's arena opens the descent to the next floor. Beating the third guardian ends the expedition and returns you to the Hold.
 
@@ -138,11 +208,16 @@ src/physics.js    World: walkable surfaces (rect/ramp/disc/ring/terrain), obstac
 src/architecture.js  Builder: platforms, bridges, stairs, pillars, arcades, crystals, towers, parapets, vista
 src/floor.js      Seamless floor: grid generation, passages between chambers, vista, abyss, visibility
 src/chamber.js    A chamber of a floor: gateways, fog walls, decoration, dormant encounters
-src/layouts.js    The six chamber archetypes plus shrine, reliquary and arena
+src/layouts.js    Chamber archetypes (gothic, imperial and titan-hewn) plus shrine, reliquary, bazaar and arena
 src/sky.js        Painterly sky dome
 src/player.js     First-person controller, loadout, guard/parry/block, attacks, spells, skills, flasks, viewmodel
 src/enemies.js    Enemy base (posture, blocking, telegraphs, stun, burn), Hollow, Shade, Acolyte, Geode Knight, Warden, Training Dummy, Bolt
-src/items.js      Relics, pedestals, the descent well
+src/items.js      Relics (stat and build-changing; common, shop, devil and angel pools), pedestals, the descent well
+src/builds.js     BuildFX: relic procs (lightning, parry bursts, orbiting knives, halo, corpse bloom, brimstone), Sunfall, shockwaves
+src/pickups.js    Coins, keys, blood vials, wooden and gilded chests
+src/shop.js       Vael the Many-Handed (animated NPC), wares on stands, the trading camera and world-anchored shop UI
+src/deals.js      Devil and angel altars
+src/settings.js   Sensitivity, FOV, invert, smoothing (localStorage)
 src/hub.js        The Roundtable Hold: island terrain, the hold, sparring grounds, sea and sky
 src/classes.js    Class definitions
 src/weapons.js    Weapon types, rarities, affixes, weapon/shield models
@@ -156,8 +231,8 @@ src/particles.js  Instanced cube particles
 src/textures.js   Procedural pixel textures
 ```
 
-## Relics
+## Stat relics
 
-Every purged chamber raises a pedestal with a random relic. Relics stack, and duplicates become less likely to appear.
+Relics stack, and duplicates become less likely to appear.
 
 Cursed Whetstone, Vampiric Ember, Ashen Greatblade Shard, Tuning Fork of the Deep (wider parry window), Warden's Aegis (cheaper blocking), Bloodied Chalice, Hollow Lung, Heart of the Unkindled, Grave Lantern, Executioner's Brand (stronger ripostes), Thorned Rosary (parries wound the attacker), Moth-Eaten Shroud, Sinner's Tithe, and the Crimson Tear (a heal, offered only when you are wounded).

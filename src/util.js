@@ -75,18 +75,41 @@ export function scaleUV(geo, su, sv = su) {
 }
 
 /**
- * A slab of wall (width x height, centred on x, bottom at y=0) pierced by pointed (gothic)
- * arches. Arches with no `bottom` are doorways notched up from the base; arches with a
+ * A slab of wall (width x height, centred on x, bottom at y=0) pierced by arches: pointed
+ * (gothic), round (imperial) or corbelled (titan-hewn). Arches with no `bottom` are doorways notched up from the base; arches with a
  * `bottom` > 0 are windows cut as holes. Extruded along Z and centred on it; UVs are world / 4.
  * Each arch: { cx, halfW, spring, peak, bottom? }.
  */
-export function archWallGeometry(width, height, depth, arches) {
+export function archWallGeometry(width, height, depth, arches, archShape = 'pointed') {
   const archPath = (path, a, fromBottom) => {
     const rise = a.peak - a.spring;
     path.lineTo(a.cx - a.halfW, fromBottom);
     path.lineTo(a.cx - a.halfW, a.spring);
-    path.bezierCurveTo(a.cx - a.halfW, a.spring + rise * 0.55, a.cx - a.halfW * 0.35, a.peak - rise * 0.08, a.cx, a.peak);
-    path.bezierCurveTo(a.cx + a.halfW * 0.35, a.peak - rise * 0.08, a.cx + a.halfW, a.spring + rise * 0.55, a.cx + a.halfW, a.spring);
+    const kind = a.shape || archShape;
+    if (kind === 'round') {
+      // A true semicircle (Roman), squashed if the wall is too short for it.
+      const r = Math.min(a.halfW, Math.max(0.2, height - a.spring - 0.3));
+      for (let i = 1; i < 12; i++) {
+        const t = Math.PI - (i / 12) * Math.PI;
+        path.lineTo(a.cx + Math.cos(t) * a.halfW, a.spring + Math.sin(t) * r);
+      }
+    } else if (kind === 'corbel') {
+      // Stepped courses leaning inward until a flat lintel caps the gap (Mycenaean).
+      const steps = 3;
+      const xs = (i) => a.halfW * (1 - (0.55 * i) / steps);
+      const ys = (i) => a.spring + (rise * i) / steps;
+      for (let i = 1; i <= steps; i++) {
+        path.lineTo(a.cx - xs(i - 1), ys(i));
+        path.lineTo(a.cx - xs(i), ys(i));
+      }
+      for (let i = steps; i >= 1; i--) {
+        path.lineTo(a.cx + xs(i), ys(i));
+        path.lineTo(a.cx + xs(i - 1), ys(i));
+      }
+    } else {
+      path.bezierCurveTo(a.cx - a.halfW, a.spring + rise * 0.55, a.cx - a.halfW * 0.35, a.peak - rise * 0.08, a.cx, a.peak);
+      path.bezierCurveTo(a.cx + a.halfW * 0.35, a.peak - rise * 0.08, a.cx + a.halfW, a.spring + rise * 0.55, a.cx + a.halfW, a.spring);
+    }
     path.lineTo(a.cx + a.halfW, fromBottom);
   };
   const doors = arches.filter((a) => !a.bottom).sort((p, q) => p.cx - q.cx);

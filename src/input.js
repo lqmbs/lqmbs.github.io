@@ -29,10 +29,24 @@ export class Input {
       this.keys.clear();
       this.lmb = this.rmb = false;
     });
+    // Browsers occasionally report a wild pointer-lock delta (on lock, on focus changes, or a
+    // known Chromium bug where one event jumps by hundreds of pixels). Such spikes spun the
+    // camera; they are dropped when far outside the recent motion.
+    this.recentMove = 0;
+    this.lockedAt = 0;
+    document.addEventListener('pointerlockchange', () => {
+      this.lockedAt = performance.now();
+      this.recentMove = 0;
+    });
     window.addEventListener('mousemove', (e) => {
       if (!this.locked) return;
-      this.lookX += e.movementX;
-      this.lookY += e.movementY;
+      const dx = e.movementX, dy = e.movementY;
+      const mag = Math.hypot(dx, dy);
+      if (performance.now() - this.lockedAt < 120) return;
+      if (mag > 180 && mag > this.recentMove * 6 + 60) return;
+      this.recentMove = this.recentMove * 0.8 + mag * 0.2;
+      this.lookX += dx;
+      this.lookY += dy;
     });
     window.addEventListener('mousedown', (e) => {
       if (!this.locked) return;
@@ -51,9 +65,16 @@ export class Input {
 
   get locked() { return document.pointerLockElement === this.canvas; }
 
+  /** Raw (unaccelerated) motion where supported — it is also free of the OS jump bugs. */
   requestLock() {
-    const p = this.canvas.requestPointerLock?.();
-    if (p && p.catch) p.catch(() => {});
+    let p;
+    try { p = this.canvas.requestPointerLock?.({ unadjustedMovement: true }); } catch { p = null; }
+    if (p && p.catch) {
+      p.catch(() => {
+        const q = this.canvas.requestPointerLock?.();
+        if (q && q.catch) q.catch(() => {});
+      });
+    }
   }
 
   now() { return performance.now() / 1000; }

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { DIRS } from './config.js';
+import { DIRS, ARCH_STYLES } from './config.js';
 import { World } from './physics.js';
 import { Builder } from './architecture.js';
 import { rand, pick, shuffle, TAU } from './util.js';
@@ -15,10 +15,11 @@ import { createSkyDome } from './sky.js';
  * without a cut, and the abyss, vista and weather belong to the floor as a whole.
  */
 export class DungeonFloor {
-  constructor(game, depth, biome) {
+  constructor(game, depth, biome, style = ARCH_STYLES.gothic) {
     this.game = game;
     this.depth = depth;
     this.biome = biome;
+    this.style = style;
     this.rooms = new Map();
     this.layoutBag = [];
     this.grassSpots = [];
@@ -29,8 +30,9 @@ export class DungeonFloor {
     this.generate();
   }
 
+  /** Chamber archetypes are dealt from the floor style's own deck, so no two floors look alike. */
   nextLayout() {
-    if (!this.layoutBag.length) this.layoutBag = shuffle(Object.keys(COMBAT_LAYOUTS));
+    if (!this.layoutBag.length) this.layoutBag = shuffle(this.style.layouts.filter((k) => COMBAT_LAYOUTS[k]));
     return this.layoutBag.pop();
   }
 
@@ -67,7 +69,11 @@ export class DungeonFloor {
       const boss = deadEnds[0];
       if (dist.get(this.key(...boss)) < 3) continue;
       const treasure = deadEnds[1 + Math.floor(Math.random() * (deadEnds.length - 1))];
-      const special = new Set([this.key(...boss), this.key(...treasure), this.key(0, 0)]);
+      // The merchant keeps to a quiet dead end of his own when there is one.
+      const spare = deadEnds.filter((c) => c !== boss && c !== treasure);
+      const loose = [...cells.values()].filter((c) => c !== boss && c !== treasure && (c[0] || c[1]) && dist.get(this.key(...c)) >= 1);
+      const shop = spare.length ? pick(spare) : pick(loose);
+      const special = new Set([this.key(...boss), this.key(...treasure), this.key(...shop), this.key(0, 0)]);
       const elites = shuffle([...cells.values()].filter((c) => !special.has(this.key(...c)) && dist.get(this.key(...c)) >= 2))
         .slice(0, this.depth >= 2 ? 2 : 1).map((c) => this.key(...c));
 
@@ -77,6 +83,7 @@ export class DungeonFloor {
         if (x === 0 && y === 0) type = 'start';
         else if (k === this.key(...boss)) type = 'boss';
         else if (k === this.key(...treasure)) type = 'treasure';
+        else if (k === this.key(...shop)) type = 'shop';
         else if (elites.includes(k)) type = 'elite';
         this.rooms.set(k, new Chamber(this.game, this, x, y, type));
       }

@@ -569,3 +569,172 @@ kbd {
 .spawn-key { font-family: var(--font-title); font-size: 11px; color: var(--gold); width: 14px; }
 .spawn-name { flex: 1; text-align: left; font-size: 17px; }
 .spawn-banish { color: #d88; }
+
+/* ---------- Banners for special moments ---------- */
+#banner.ult .banner-text { color: #fff0c0; letter-spacing: 0.3em; font-size: clamp(22px, 3.4vw, 38px); text-shadow: 0 0 24px rgba(255, 220, 140, 0.8), 0 2px 4px #000; }
+#banner.devil .banner-text { color: #ff4a2a; text-shadow: 0 0 26px rgba(255, 40, 10, 0.8), 0 2px 4px #000; }
+#banner.angel .banner-text { color: #fff4d0; text-shadow: 0 0 26px rgba(255, 240, 180, 0.9), 0 2px 4px #000; }
+#banner.shop .banner-text { color: #d8b0ff; text-shadow: 0 0 20px rgba(176, 128, 255, 0.7), 0 2px 4px #000; font-size: clamp(22px, 3.4vw, 38px); }
+#banner.treasure .banner-text { color: #f0c040; font-size: clamp(22px, 3.4vw, 38px); }
+
+/* ---------- Wallet ---------- */
+#wallet {
+  position: absolute;
+  top: 176px;
+  right: 22px;
+  display: flex;
+  gap: 16px;
+  font-family: var(--font-title);
+  font-size: 17px;
+  color: var(--bone);
+  text-shadow: 0 1px 3px #000;
+}
+#wallet span { display: flex; align-items: center; gap: 6px; }
+#wallet .coins::before {
+  content: '';
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #ffe79a, #c9951c 70%);
+  box-shadow: 0 0 6px rgba(240, 192, 64, 0.6);
+}
+#wallet .keys::before {
+  content: '';
+  width: 6px; height: 13px;
+  border: 2px solid #d0d8e8;
+  border-radius: 6px 6px 1px 1px;
+  box-shadow: 0 0 5px rgba(208, 216, 232, 0.5);
+}
+#wallet .bump { animation: bump 0.3s ease; }
+@keyframes bump { 40% { transform: scale(1.35); color: #fff4c0; } }
+
+/* ---------- Ultimate ---------- */
+#ult-slot { border-color: #3a3448; }
+#ult-slot .ult-fill {
+  position: absolute; inset: 0;
+  transform-origin: bottom;
+  transform: scaleY(0);
+  background: linear-gradient(to top, rgba(255, 170, 60, 0.55), rgba(255, 230, 150, 0.12));
+}
+#ult-slot .ult-rune {
+  position: absolute;
+  width: 18px; height: 18px;
+  top: 12px;
+  border: 2px solid #8a7a5a;
+  transform: rotate(45deg);
+}
+#ult-slot .slot-name { padding-top: 26px; position: relative; }
+#ult-slot.ready {
+  border-color: #ffd070;
+  box-shadow: 0 0 0 1px #000, 0 0 16px rgba(255, 200, 100, 0.6), inset 0 0 18px rgba(255, 210, 120, 0.5);
+  animation: ultpulse 1.2s ease-in-out infinite;
+}
+#ult-slot.ready .ult-rune { border-color: #fff0c0; box-shadow: 0 0 10px #ffd070; }
+#ult-slot.denied { animation: drained 0.35s ease; }
+#ult-slot.burst { animation: ultburst 0.6s ease; }
+@keyframes ultpulse { 50% { box-shadow: 0 0 0 1px #000, 0 0 26px rgba(255, 200, 100, 0.9), inset 0 0 22px rgba(255, 210, 120, 0.7); } }
+@keyframes ultburst { 0% { transform: scale(1); } 30% { transform: scale(1.25); filter: brightness(2); } 100% { transform: scale(1); } }
+
+/* ---------- Settings ---------- */
+.settings {
+  display: grid;
+  gap: 8px;
+  margin: 18px auto 0;
+  width: min(420px, 90vw);
+  padding: 12px 16px;
+  border: 1px solid #3a342c;
+  background: rgba(8, 7, 6, 0.6);
+  cursor: default;
+}
+.set-row { display: grid; grid-template-columns: 1fr 150px 52px; align-items: center; gap: 10px; font-size: 15px; color: var(--bone-dim); text-align: left; }
+.set-row input[type=checkbox] { justify-self: start; accent-color: var(--gold); width: 16px; height: 16px; }
+.set-row input[type=range] { accent-color: var(--gold); width: 100%; }
+.set-value { color: var(--bone); font-family: var(--font-title); font-size: 13px; text-align: right; }
+
+/* ---------- The merchant's shop ---------- */
+#shop { position: fixed; inset: 0; z-index: 25; pointer-events: none; }
+#shop .shop-panel {
+  pointer-events: auto;
+  position: absolute;
+  right: 3vw;
+  top: 50%;
+  transform: translateY(-50%);
+  width: min(380px, 38vw);
+  padding: 18px 20px 14px;
+  background: linear-gradient(to bottom, rgba(24, 14, 36, 0.9), rgba(8, 6, 12, 0.92));
+  border: 1px solid #5a4078;
+  box-shadow: 0 0 0 1px #000, 0 0 40px rgba(120, 70, 200, 0.25), inset 0 0 30px rgba(0, 0, 0, 0.6);
+  animation: shopin 0.5s ease both;
+}
+@keyframes shopin { from { opacity: 0; transform: translate(30px, -50%); } }
+#shop header h2 { margin: 0; font-family: var(--font-title); font-weight: 400; letter-spacing: 0.12em; color: #e0c8ff; font-size: 26px; text-shadow: 0 0 12px rgba(176, 128, 255, 0.6); }
+#shop .shop-sub { font-style: italic; color: #9a88b0; margin-top: 2px; }
+.shop-wallet { display: flex; gap: 18px; margin: 12px 0 8px; font-family: var(--font-title); font-size: 18px; }
+.shop-wallet.denied { animation: drained 0.4s ease; }
+.shop-wallet span { display: flex; align-items: center; gap: 7px; }
+.wallet-coins::before { content: ''; width: 13px; height: 13px; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #ffe79a, #c9951c 70%); box-shadow: 0 0 6px rgba(240, 192, 64, 0.6); }
+.wallet-keys::before { content: ''; width: 6px; height: 13px; border: 2px solid #d0d8e8; border-radius: 6px 6px 1px 1px; }
+.shop-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid #3a2a50; }
+.shop-row {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  padding: 7px 8px;
+  border-bottom: 1px solid #241a34;
+  cursor: pointer;
+  font-size: 16px;
+  transition: background 0.15s;
+}
+.shop-row .row-price { font-family: var(--font-title); color: #f0d070; display: flex; align-items: center; gap: 5px; }
+.shop-row .row-price::before { content: ''; width: 9px; height: 9px; border-radius: 50%; background: #e0b040; }
+.shop-row.sel { background: linear-gradient(to right, rgba(176, 128, 255, 0.22), transparent); box-shadow: inset 2px 0 0 #c8a0ff; }
+.shop-row.poor .row-price { color: #a04040; }
+.shop-row.sold { opacity: 0.35; }
+.shop-row.sold .row-price::before { display: none; }
+.shop-detail { min-height: 70px; padding: 10px 4px 4px; }
+.detail-name { font-family: var(--font-title); font-size: 18px; }
+.detail-desc { color: var(--bone); margin-top: 3px; }
+.detail-mech { color: #c8a0ff; font-size: 13px; margin-top: 5px; letter-spacing: 0.08em; text-transform: uppercase; }
+#shop footer { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 10px; font-size: 13px; color: #8a7a9a; }
+#shop footer kbd { font-size: 11px; }
+.shop-leave { font-family: var(--font-title); background: transparent; color: var(--bone); border: 1px solid #5a4078; padding: 5px 10px; cursor: pointer; }
+.shop-leave:hover { border-color: #c8a0ff; }
+.shop-tag {
+  position: absolute; left: 0; top: 0;
+  font-family: var(--font-title);
+  font-size: 12px;
+  padding: 2px 8px;
+  color: #d8c8f0;
+  background: rgba(10, 6, 16, 0.7);
+  border: 1px solid #3a2a50;
+  white-space: nowrap;
+  transition: color 0.2s, border-color 0.2s;
+}
+.shop-tag.sel { color: #fff0c0; border-color: #c8a0ff; box-shadow: 0 0 10px rgba(176, 128, 255, 0.5); }
+.shop-tag.sold { opacity: 0.4; text-decoration: line-through; }
+.shop-bracket { position: absolute; left: 0; top: 0; }
+.shop-bracket i { position: absolute; width: 14px; height: 14px; border: 2px solid #e8d0ff; filter: drop-shadow(0 0 4px #b080ff); }
+.shop-bracket i:nth-child(1) { left: 0; top: 0; border-right: 0; border-bottom: 0; }
+.shop-bracket i:nth-child(2) { right: 0; top: 0; border-left: 0; border-bottom: 0; }
+.shop-bracket i:nth-child(3) { left: 0; bottom: 0; border-right: 0; border-top: 0; }
+.shop-bracket i:nth-child(4) { right: 0; bottom: 0; border-left: 0; border-top: 0; }
+.shop-bracket.sold i { border-color: #6a5a7a; filter: none; }
+
+#npc-bubble {
+  position: fixed; left: 0; top: 0;
+  z-index: 24;
+  max-width: 300px;
+  padding: 8px 12px 10px;
+  background: rgba(14, 8, 22, 0.88);
+  border: 1px solid #6a4a90;
+  box-shadow: 0 0 18px rgba(140, 90, 220, 0.35);
+  pointer-events: none;
+  margin-top: -14px;
+}
+#npc-bubble::after {
+  content: '';
+  position: absolute; left: 50%; bottom: -8px;
+  border: 8px solid transparent; border-bottom: 0; border-top-color: #6a4a90;
+  transform: translateX(-50%);
+}
+#npc-bubble .npc-name { font-family: var(--font-title); font-size: 11px; letter-spacing: 0.12em; color: #c8a0ff; text-transform: uppercase; }
+#npc-bubble .npc-text { font-size: 16px; color: #efe6d6; line-height: 1.25; min-height: 1.25em; }
+
+#hud.shopping #actions, #hud.shopping #loadout, #hud.shopping #minimap, #hud.shopping #wallet, #hud.shopping #crosshair, #hud.shopping #vitals { opacity: 0; transition: opacity 0.4s; }

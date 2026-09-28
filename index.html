@@ -26,7 +26,8 @@
       <span id="floor-name">The Sunken Ossuary</span>
     </div>
 
-    <canvas id="minimap" width="176" height="120"></canvas>
+    <canvas id="minimap" width="200" height="150"></canvas>
+    <div id="wallet"><span class="coins">0</span><span class="keys">0</span></div>
 
     <div id="vitals">
       <div id="hp-bar" class="bar hp"><div class="trail"></div><div class="fill"></div></div>
@@ -36,6 +37,7 @@
 
     <div id="actions">
       <div id="skill-slot" class="slot"><div class="cd"></div><span class="slot-key">Q</span><span class="slot-name"></span></div>
+      <div id="ult-slot" class="slot"><div class="ult-fill"></div><span class="slot-key">R</span><span class="ult-rune"></span><span class="slot-name"></span></div>
       <div id="flask-slot" class="slot"><span class="slot-key">F</span><span class="flask-icon"></span><span class="count">3</span></div>
     </div>
 
@@ -75,10 +77,11 @@
         <li><kbd>W A S D</kbd> Move &nbsp; <kbd>Shift</kbd> Sprint &nbsp; <kbd>Space</kbd> Jump</li>
         <li><kbd>Mouse</kbd> Look &nbsp; <kbd>Left Click</kbd> Attack / cast &nbsp; <kbd>Right Click</kbd> Guard</li>
         <li>Raise your guard <em>as the blow lands</em> to parry. A <span class="gleam">gleam</span> can be parried; a <span class="red">red glow</span> cannot.</li>
-        <li><kbd>Q</kbd> Class skill &nbsp; <kbd>F</kbd> Flask &nbsp; <kbd>E</kbd> Interact &nbsp; <kbd>1 2 3</kbd> / <kbd>Wheel</kbd> Weapons</li>
+        <li><kbd>Q</kbd> Class skill &nbsp; <kbd>R</kbd> Ultimate &nbsp; <kbd>F</kbd> Flask &nbsp; <kbd>E</kbd> Interact &nbsp; <kbd>1 2 3</kbd> / <kbd>Wheel</kbd> Weapons</li>
         <li><kbd>G</kbd> Drop weapon &nbsp; <kbd>Tab</kbd> Inventory &nbsp; <kbd>Esc</kbd> Pause &nbsp; <kbd>M</kbd> Mute</li>
       </ul>
       <button id="start-btn">Enter the Hold</button>
+      <div id="title-settings"></div>
     </div>
   </div>
 
@@ -86,11 +89,32 @@
     <div class="title-inner">
       <h2>Paused</h2>
       <div id="pause-stats"></div>
-      <p class="hint">Click to resume</p>
+      <div id="pause-settings"></div>
+      <p class="hint">Click anywhere else to resume</p>
     </div>
   </div>
 
   <div id="menu" class="overlay hidden"></div>
+
+  <div id="shop" class="hidden">
+    <div class="shop-tags"></div>
+    <div class="shop-bracket"><i></i><i></i><i></i><i></i></div>
+    <aside class="shop-panel">
+      <header>
+        <h2>Vael's Curios</h2>
+        <div class="shop-sub">A wandering merchant of the deep</div>
+      </header>
+      <div class="shop-wallet"></div>
+      <ul class="shop-list"></ul>
+      <div class="shop-detail"></div>
+      <footer>
+        <span><kbd>A</kbd><kbd>D</kbd> browse</span>
+        <span><kbd>E</kbd> / click buy</span>
+        <button class="shop-leave">Leave <kbd>Esc</kbd></button>
+      </footer>
+    </aside>
+  </div>
+  <div id="npc-bubble" class="hidden"><div class="npc-name"></div><div class="npc-text"></div></div>
 
   <div id="death-screen" class="overlay hidden">
     <div class="died">YOU DIED</div>
@@ -99,6 +123,6 @@
 
   <div id="crt"></div>
 
-  <script type="module" src="game.js?v=4"></script>
+  <script type="module" src="game.js?v=5"></script>
 </body>
 </html>

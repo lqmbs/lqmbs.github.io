@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import { CONFIG, BIOMES } from './src/config.js';
-import { rand, clamp, damp, flicker, toRoman, chance, angleDiff, shuffle, pick } from './src/util.js';
+import { CONFIG, BIOMES, ARCH_STYLES } from './src/config.js';
+import { rand, randInt, clamp, damp, flicker, toRoman, chance, angleDiff, shuffle, pick } from './src/util.js';
 import { AudioEngine } from './src/audio.js';
 import { Input } from './src/input.js';
 import { RetroPass } from './src/post.js';
@@ -15,6 +15,9 @@ import { Bolt } from './src/enemies.js';
 import { WeaponDrop } from './src/loot.js';
 import { rollWeapon } from './src/weapons.js';
 import { CLASSES } from './src/classes.js';
+import { Settings } from './src/settings.js';
+import { Sunfall } from './src/builds.js';
+import { Pickup, dropCoins } from './src/pickups.js';
 
 const EXPEDITION_FLOORS = 3;
 
@@ -42,6 +45,7 @@ class Game {
     this.bolts = [];
     this.focus = null;
 
+    this.settings = new Settings();
     this.initRenderer();
     this.initMaterials();
     this.audio = new AudioEngine();
@@ -77,7 +81,12 @@ class Game {
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x0a1426);
     this.scene.fog = new THREE.FogExp2(0x0a1426, CONFIG.fogDensity);
-    this.camera = new THREE.PerspectiveCamera(CONFIG.camera.fov, 1, 0.05, 900);
+    this.camera = new THREE.PerspectiveCamera(this.settings.get('fov'), 1, 0.05, 900);
+    this.settings.onChange((k, v) => {
+      if (k !== 'fov') return;
+      this.camera.fov = v;
+      this.camera.updateProjectionMatrix();
+    });
     this.scene.add(this.camera);
     this.post = new RetroPass(this.renderer);
     this.resize();
@@ -109,6 +118,11 @@ class Game {
       leaf: [0x4e5c30, 0x5c6636, 0x3e4a28].map((c) => new THREE.MeshStandardMaterial({ color: c, roughness: 1, flatShading: true })),
       moss: new THREE.MeshStandardMaterial({ color: 0x3a4a28, roughness: 1, polygonOffset: true, polygonOffsetFactor: -1, side: THREE.DoubleSide }),
       lava: new THREE.MeshBasicMaterial({ color: 0xff6a1a }),
+      gold: new THREE.MeshStandardMaterial({ color: 0xe0b050, emissive: 0x6a4a10, emissiveIntensity: 1.3, roughness: 0.3, metalness: 0.8, flatShading: true }),
+      goldCloth: new THREE.MeshStandardMaterial({ color: 0x8a6420, emissive: 0x2a1a04, roughness: 1, flatShading: true }),
+      arcaneCloth: new THREE.MeshStandardMaterial({ color: 0x3a2260, roughness: 1, flatShading: true, side: THREE.DoubleSide }),
+      bloodGlow: new THREE.MeshBasicMaterial({ color: 0xff2a10 }),
+      arcane: new THREE.MeshBasicMaterial({ color: 0xc090ff }),
     };
     this.flameGeo = new THREE.BoxGeometry(0.05, 0.11, 0.05);
     this.riposteTexture = Textures.riposteGlyph();
@@ -192,10 +206,11 @@ class Game {
       this.sun.intensity = sunlit ? 2.0 : 0;
       this.sun.castShadow = sunlit;
       this.lanternScale = sunlit ? 0.6 : 1;
-      M.floor.color.setHex(t.stone.floor);
-      M.brick.color.setHex(t.stone.brick);
-      M.trim.color.setHex(t.stone.trim);
-      M.rock.color.setHex(t.stone.rock);
+      const tint = new THREE.Color(this.floor?.style.tint ?? 0xffffff);
+      M.floor.color.setHex(t.stone.floor).multiply(tint);
+      M.brick.color.setHex(t.stone.brick).multiply(tint);
+      M.trim.color.setHex(t.stone.trim).multiply(tint);
+      M.rock.color.setHex(t.stone.rock).multiply(tint);
       M.crystal.color.setHex(t.crystal);
       M.crystal.emissive.setHex(t.crystal);
       M.crystal.emissiveIntensity = t.id === 'sunken' ? 1.4 : 1.05;
@@ -231,6 +246,12 @@ class Game {
     document.getElementById('start-btn').addEventListener('click', () => this.start());
     this.deathScreen.addEventListener('click', () => this.restart());
     this.pauseScreen.addEventListener('click', () => this.input.requestLock());
+    this.settings.mount(document.getElementById('pause-settings'));
+    this.settings.mount(document.getElementById('title-settings'));
+    // Clicking the view re-captures the mouse if a menu let it go.
+    this.renderer.domElement.addEventListener('click', () => {
+      if (this.state === 'playing' && !this.input.locked) this.input.requestLock();
+    });
     document.addEventListener('pointerlockchange', () => {
       if (this.input.locked) {
         if (this.state === 'paused') this.resume();
@@ -310,6 +331,7 @@ class Game {
       this.mode = 'run';
       this.depth = 1;
       this.runBiomes = shuffle(Object.keys(BIOMES)).slice(0, EXPEDITION_FLOORS);
+      this.runStyles = shuffle(Object.keys(ARCH_STYLES));
       this.hub.clearEnemies();
       this.hub.exit();
       this.player.resetLoadout();
@@ -327,12 +349,15 @@ class Game {
     this.floor?.dispose();
     this.room = null;
     this.biome = BIOMES[this.runBiomes?.[this.depth - 1] ?? pick(Object.keys(BIOMES))];
-    this.floor = new DungeonFloor(this, this.depth, this.biome);
+    const style = ARCH_STYLES[this.runStyles?.[(this.depth - 1) % 3] ?? pick(Object.keys(ARCH_STYLES))];
+    this.floor = new DungeonFloor(this, this.depth, this.biome, style);
     this.setEnvironment('depths');
     this.floor.build();
     const name = `${this.biome.name}`;
     this.hud.setFloor(this.depth, name);
     this.player.flasks = this.player.maxFlasks;
+    this.player.stats.deathWard = this.player.stats.wardMax || 0;
+    this.tookDamage = false;
     this.particles.clear();
     this.glow.clear();
     for (const e of this.effects) e.dispose();
@@ -350,7 +375,7 @@ class Game {
   switchRoom(room) {
     this.room = room;
     room.onPlayerEnter();
-    this.hud.drawMinimap(this.floor, room);
+    this.hud.drawMinimap(this.floor, room, this.player);
   }
 
   nearbyEnemies() { return this.mode === 'run' && this.floor ? this.floor.activeEnemies : this.room.enemies; }
@@ -473,7 +498,7 @@ class Game {
     this.audio.play('fall');
     this.runTransition(() => {
       const p = this.player;
-      p.hp -= p.stats.maxHp * (this.theme.abyss === 'lava' ? 0.35 : 0.2);
+      if (!p.stats.fallImmune) p.hp -= p.stats.maxHp * (this.theme.abyss === 'lava' ? 0.35 : 0.2);
       this.hurtFlash = 1;
       const safe = p.lastSafe ?? this.entry?.pose;
       this.placePlayer({ x: safe.x, y: safe.y, z: safe.z, yaw: p.yaw });
@@ -511,6 +536,29 @@ class Game {
     this.menus.close();
     this.menuOpen = false;
     this.state = 'playing';
+    this.input.clearBuffers();
+    this.input.requestLock();
+    this.clock.getDelta();
+  }
+
+  /** The merchant's trading view: the world keeps living; the camera frames him and his wares. */
+  openShop(shop) {
+    if (!shop || this.shop) return;
+    this.shop = shop;
+    this.state = 'shop';
+    this.menuOpen = true;
+    this.hud.setPrompt(null);
+    this.player.viewmodel.scene.visible = false;
+    this.player.setState('idle');
+    document.exitPointerLock?.();
+    shop.openShop();
+  }
+
+  closeShop() {
+    this.shop = null;
+    this.menuOpen = false;
+    this.state = 'playing';
+    this.player.viewmodel.scene.visible = true;
     this.input.clearBuffers();
     this.input.requestLock();
     this.clock.getDelta();
@@ -576,6 +624,32 @@ class Game {
     this.glow.burst(from, 8, () => ({ vel: new THREE.Vector3(rand(-1, 1), rand(-1, 1), rand(-1, 1)), life: 0.25, size: 0.04, color: w.bolt.color, drag: 3 }));
   }
 
+  /** Lantern Mage's ultimate. */
+  sunfall(player, target) {
+    this.addEffect(new Sunfall(this, target, player));
+    this.audio.play('sunfall');
+  }
+
+  /** Coins, keys and vials walked over. */
+  onPickup(kind, value, pos) {
+    const p = this.player;
+    if (kind === 'coin') {
+      p.coins += value;
+      this.audio.play('coin');
+    } else if (kind === 'key') {
+      p.keys++;
+      this.audio.play('key');
+      this.hud.toast('Iron Key', 'Opens a gilded chest or a locked gate', 0xd0d8e8);
+    } else {
+      p.hp = Math.min(p.stats.maxHp, p.hp + 25);
+      this.audio.play('heal');
+    }
+    this.hud.bumpWallet(kind);
+    this.glow.burst(pos.clone().setY(pos.y + 0.4), 8, () => ({
+      vel: new THREE.Vector3(rand(-1, 1), rand(1, 2.5), rand(-1, 1)), life: rand(0.3, 0.6), size: 0.04, color: kind === 'coin' ? 0xf0c040 : kind === 'key' ? 0xd0d8e8 : 0xff3040, drag: 2,
+    }));
+  }
+
   /** Lantern Mage: blind, stagger and ignite everything nearby. */
   flare(player) {
     this.audio.play('flare');
@@ -608,8 +682,12 @@ class Game {
     } else if (enemy.distToPlayer() < 14) this.audio.play('glint');
   }
 
-  onEnemyHit(enemy, result, dir, dmg = 0) {
+  onEnemyHit(enemy, result, dir, dmg = 0, { proc = false } = {}) {
     const p = this.player;
+    if (result !== 'miss' && result !== 'blocked' && dmg > 0) {
+      if (!proc) p.fx.onHit(enemy, dmg, result);
+      else p.addUltCharge(dmg * 0.12);
+    }
     const c = enemy.pos.clone();
     c.y += enemy.height * 0.6;
     switch (result) {
@@ -704,12 +782,20 @@ class Game {
     this.shake(0.2);
     const S = this.player.stats;
     if (S.lifesteal > 0) this.player.hp = Math.min(S.maxHp, this.player.hp + S.lifesteal * 2);
+    this.player.fx.onKill(enemy);
     if (this.mode !== 'run' || fell) return;
+    // Coin, and now and then a key or a vial of blood.
+    const area = enemy.chamber;
+    const at = enemy.pos.clone().setY(enemy.pos.y + 0.6);
+    const big = enemy.isBoss || enemy.elite;
+    if (big || chance(0.6)) dropCoins(this, area, at, Math.round((big ? 6 : enemy.mass >= 3 ? 3 : randInt(1, 2)) * S.coinMult));
+    if (chance(enemy.mass >= 3 ? 0.12 : 0.05)) new Pickup(this, area, 'key', at);
+    else if (chance(0.05)) new Pickup(this, area, 'vial', at);
     // Loot: bosses always drop something good; heavier foes are likelier to.
     const odds = enemy.isBoss ? 1 : enemy.mass >= 3 ? 0.45 : 0.12;
     if (chance(odds)) {
       const pos = enemy.pos.clone();
-      new WeaponDrop(this, this.room, rollWeapon(this.depth, enemy.isBoss ? 2 : 0), pos);
+      new WeaponDrop(this, area, rollWeapon(this.depth, enemy.isBoss ? 2 : 0), pos);
     }
   }
 
@@ -742,6 +828,7 @@ class Game {
     item.apply(p.stats, p);
     p.itemCounts.set(item.id, (p.itemCounts.get(item.id) || 0) + 1);
     p.hp = Math.min(p.hp, p.stats.maxHp);
+    p.fx.sync();
     this.audio.play('pickup');
     this.hud.showItem(item);
     this.hud.renderRelics(p);
@@ -759,8 +846,10 @@ class Game {
       ['Weapon', p.weapon.displayName],
       ['Damage', `×${S.damageMult.toFixed(2)}`],
       ['Parry window', `${Math.round(p.parryWindow * 1000)} ms`],
+      ['Coin · Keys', `${p.coins} · ${p.keys}`],
+      ['Ultimate', `${p.classDef.ultimate.name} ${Math.floor((p.ultCharge / p.ultMax) * 100)}%`],
       ['Riposte', `×${S.riposteMult.toFixed(1)}`],
-      ['Location', this.mode === 'hub' ? this.hub.name : `Floor ${toRoman(this.depth)}`],
+      ['Location', this.mode === 'hub' ? this.hub.name : `Floor ${toRoman(this.depth)} · ${this.floor?.style.name ?? ''}`],
     ];
     const grid = document.getElementById('pause-stats');
     grid.replaceChildren();
@@ -782,6 +871,21 @@ class Game {
     if (input.wasPressed('KeyR')) this.restart();
 
     if (this.state === 'paused' || this.state === 'menu') {
+      input.endFrame();
+      this.render();
+      return;
+    }
+    if (this.state === 'shop') {
+      // The world keeps breathing while you haggle.
+      this.time += realDt;
+      this.shop?.update(realDt);
+      if (this.floor) this.floor.update(realDt, this.room);
+      this.particles.update(realDt);
+      this.glow.update(realDt);
+      this.effects = this.effects.filter((e) => e.update(realDt));
+      this.updateAmbience(realDt, realDt);
+      this.audio.update(realDt);
+      this.hud.update(realDt, this.player, this.camera);
       input.endFrame();
       this.render();
       return;
@@ -815,6 +919,11 @@ class Game {
         }
       } else this.room.update(dt);
       this.updateInteraction();
+      this.minimapTimer = (this.minimapTimer || 0) - realDt;
+      if (this.mode === 'run' && this.floor && this.minimapTimer <= 0) {
+        this.minimapTimer = 0.08;
+        this.hud.drawMinimap(this.floor, this.room, this.player);
+      }
     } else {
       this.player.updateCamera(dt, 0);
     }

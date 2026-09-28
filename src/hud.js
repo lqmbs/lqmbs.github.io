@@ -1,5 +1,6 @@
 import { ITEMS } from './items.js';
 import * as THREE from 'three';
+import { CELL } from './chamber.js';
 import { clamp, damp, toRoman } from './util.js';
 import { hex } from './weapons.js';
 
@@ -52,7 +53,17 @@ export class HUD {
     this.numbers = [];
     this.toastTimer = 0;
     this.loadoutKey = '';
+    this.ultSlot = $('#ult-slot');
+    this.ultFill = $('#ult-slot .ult-fill');
+    this.ultName = $('#ult-slot .slot-name');
+    this.coinsEl = $('#wallet .coins');
+    this.keysEl = $('#wallet .keys');
+    this.walletEl = $('#wallet');
   }
+
+  flashUlt() { this.pulse(this.ultSlot, 'denied'); }
+  ultReady() { this.pulse(this.ultSlot, 'burst'); }
+  bumpWallet(kind) { this.pulse(kind === 'key' ? this.keysEl : this.coinsEl, 'bump'); }
 
   setMinimapVisible(v) { this.minimap.classList.toggle('hidden', !v); }
   flashMana() { this.pulse(this.mpBar, 'drained'); }
@@ -76,6 +87,7 @@ export class HUD {
       this.weaponsEl.appendChild(slot);
     });
     this.skillName.textContent = player.classDef.skill.name;
+    this.ultName.textContent = player.classDef.ultimate.name;
     this.mpBar.classList.toggle('hidden', !player.stats.maxMana);
     if (!this.inventoryEl.classList.contains('hidden')) this.renderInventory(player);
   }
@@ -165,7 +177,7 @@ export class HUD {
     inv.appendChild(grid);
     const foot = document.createElement('div');
     foot.className = 'inv-foot';
-    foot.textContent = `Vigor ${Math.ceil(player.hp)}/${S.maxHp} · Endurance ${S.maxStamina}${S.maxMana ? ` · Mana ${S.maxMana}` : ''} · Flasks ${player.flasks}/${player.maxFlasks} · Parry ${Math.round(player.parryWindow * 1000)} ms   —   [1-3] switch · [G] drop · [Tab] close`;
+    foot.textContent = `Vigor ${Math.ceil(player.hp)}/${S.maxHp} · Endurance ${S.maxStamina}${S.maxMana ? ` · Mana ${S.maxMana}` : ''} · Flasks ${player.flasks}/${player.maxFlasks} · Coin ${player.coins} · Keys ${player.keys} · Parry ${Math.round(player.parryWindow * 1000)} ms   —   [1-3] switch · [G] drop · [Tab] close`;
     inv.appendChild(foot);
   }
 
@@ -246,7 +258,13 @@ export class HUD {
 
   update(dt, player, camera) {
     if (player.stats.maxMana) this.mpFill.style.transform = `scaleX(${clamp(player.mana / player.stats.maxMana, 0, 1)})`;
-    const cdMax = player.classDef.skill.cooldown;
+    const u = clamp(player.ultCharge / player.ultMax, 0, 1);
+    this.ultFill.style.transform = `scaleY(${u})`;
+    this.ultSlot.classList.toggle('ready', u >= 1);
+    this.coinsEl.textContent = player.coins;
+    this.keysEl.textContent = player.keys;
+    this.walletEl.classList.toggle('hidden', this.minimap.classList.contains('hidden') && !player.coins && !player.keys);
+    const cdMax = player.classDef.skill.cooldown * player.stats.skillCdMult;
     const cd = clamp(player.skillCd / cdMax, 0, 1);
     this.skillCd.style.background = cd > 0 ? `conic-gradient(rgba(0,0,0,0.72) ${cd * 360}deg, transparent 0)` : 'transparent';
     this.skillSlot.classList.toggle('ready', cd === 0);
@@ -309,27 +327,120 @@ export class HUD {
     }
   }
 
-  drawMinimap(floor, current) {
+  /**
+   * The floor map, true to scale: every chamber is a square cell (as they are in the world),
+   * passages are drawn between gates, and the knight is an arrow at their real position and
+   * heading. Special rooms carry icons.
+   */
+  drawMinimap(floor, current, player) {
     const ctx = this.mctx;
     const W = this.minimap.width, H = this.minimap.height;
-    const cw = 22, ch = 14, gap = 4;
+    const cell = 30, room = 20;
+    const scale = cell / CELL;
+    const px = player ? player.pos.x : current.ox, pz = player ? player.pos.z : current.oz;
+    // The map scrolls with the knight.
+    const sx = (x) => W / 2 + (x - px) * scale;
+    const sy = (z) => H / 2 + (z - pz) * scale;
     ctx.clearRect(0, 0, W, H);
-    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    ctx.fillStyle = 'rgba(4,4,8,0.55)';
     ctx.fillRect(0, 0, W, H);
-    for (const room of floor.rooms.values()) {
-      if (!room.seen) continue;
-      const x = Math.round(W / 2 + (room.gx - current.gx) * (cw + gap) - cw / 2);
-      const y = Math.round(H / 2 + (room.gy - current.gy) * (ch + gap) - ch / 2);
-      if (x < -cw || y < -ch || x > W || y > H) continue;
-      ctx.fillStyle = room === current ? '#d8cfb8' : room.visited ? '#4f5566' : '#1c1f28';
-      ctx.fillRect(x, y, cw, ch);
-      ctx.strokeStyle = room.visited ? '#7d8599' : '#3a3f4c';
-      ctx.strokeRect(x + 0.5, y + 0.5, cw - 1, ch - 1);
-      const icon = room.type === 'boss' ? '#c42a1f' : room.type === 'treasure' ? '#c9a45c' : null;
-      if (icon) {
-        ctx.fillStyle = icon;
-        ctx.fillRect(x + cw / 2 - 3, y + ch / 2 - 3, 6, 6);
+    ctx.lineWidth = 3;
+    // Passages first, under the rooms.
+    for (const r of floor.rooms.values()) {
+      if (!r.seen) continue;
+      for (const dir of ['e', 's']) {
+        const n = r.neighbors[dir];
+        if (!n || !n.seen) continue;
+        ctx.strokeStyle = r.visited || n.visited ? '#6a6f80' : '#2e323c';
+        ctx.beginPath();
+        ctx.moveTo(sx(r.ox), sy(r.oz));
+        ctx.lineTo(sx(n.ox), sy(n.oz));
+        ctx.stroke();
       }
+    }
+    const fills = { boss: '#3a0c0a', treasure: '#3a2c0c', shop: '#2a1a40', elite: '#3a220c' };
+    const strokes = { boss: '#c42a1f', treasure: '#e0b050', shop: '#b080ff', elite: '#e08a30' };
+    for (const r of floor.rooms.values()) {
+      if (!r.seen) continue;
+      const x = Math.round(sx(r.ox) - room / 2), y = Math.round(sy(r.oz) - room / 2);
+      if (x < -room || y < -room || x > W || y > H) continue;
+      const special = fills[r.type];
+      ctx.fillStyle = r === current ? '#5a5a52' : special ? special : r.visited ? '#3a3e4a' : '#15171e';
+      ctx.fillRect(x, y, room, room);
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = strokes[r.type] ?? (r.visited ? '#7d8599' : '#3a3f4c');
+      ctx.strokeRect(x + 0.5, y + 0.5, room - 1, room - 1);
+      if (r.type === 'boss' || r.type === 'elite') ctx.strokeRect(x + 2.5, y + 2.5, room - 5, room - 5);
+      this.drawIcon(ctx, r, x + room / 2, y + room / 2);
+      if (r.state === 'combat') {
+        ctx.fillStyle = '#c42a1f';
+        ctx.fillRect(x + room - 5, y + 2, 3, 3);
+      }
+    }
+    if (player) {
+      // The knight: an arrow pointing the way they face.
+      const a = player.yaw;
+      const fx = -Math.sin(a), fz = -Math.cos(a);
+      const cx = W / 2, cy = H / 2;
+      ctx.fillStyle = '#f0e6c8';
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(cx + fx * 6, cy + fz * 6);
+      ctx.lineTo(cx - fx * 4 + fz * 3.5, cy - fz * 4 - fx * 3.5);
+      ctx.lineTo(cx - fx * 2, cy - fz * 2);
+      ctx.lineTo(cx - fx * 4 - fz * 3.5, cy - fz * 4 + fx * 3.5);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }
+  }
+
+  drawIcon(ctx, r, cx, cy) {
+    switch (r.type) {
+      case 'boss':
+        // A skull.
+        ctx.fillStyle = '#e0d8c8';
+        ctx.fillRect(cx - 4, cy - 4, 8, 6);
+        ctx.fillRect(cx - 3, cy + 2, 6, 2);
+        ctx.fillStyle = '#3a0c0a';
+        ctx.fillRect(cx - 3, cy - 2, 2, 2);
+        ctx.fillRect(cx + 1, cy - 2, 2, 2);
+        break;
+      case 'treasure':
+        // A crown.
+        ctx.fillStyle = '#f0c040';
+        ctx.fillRect(cx - 5, cy, 10, 3);
+        ctx.fillRect(cx - 5, cy - 4, 2, 4);
+        ctx.fillRect(cx - 1, cy - 5, 2, 5);
+        ctx.fillRect(cx + 3, cy - 4, 2, 4);
+        break;
+      case 'shop':
+        // A coin.
+        ctx.fillStyle = '#f0c040';
+        ctx.beginPath();
+        ctx.arc(cx, cy, 4.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#2a1a40';
+        ctx.fillRect(cx - 0.5, cy - 3, 1.5, 6);
+        break;
+      case 'elite':
+        ctx.fillStyle = '#e08a30';
+        ctx.beginPath();
+        ctx.moveTo(cx, cy - 5);
+        ctx.lineTo(cx + 4, cy);
+        ctx.lineTo(cx, cy + 5);
+        ctx.lineTo(cx - 4, cy);
+        ctx.fill();
+        break;
+      case 'start':
+        ctx.fillStyle = '#ffb060';
+        ctx.fillRect(cx - 1, cy - 1, 3, 3);
+        break;
+    }
+    if (r.deal && !r.deal.pedestals.every((p) => p.taken)) {
+      ctx.fillStyle = r.deal.kind === 'devil' ? '#ff3010' : '#fff0c0';
+      ctx.fillRect(cx + 5, cy - 8, 3, 3);
     }
   }
 }

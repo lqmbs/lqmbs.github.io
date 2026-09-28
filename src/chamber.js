@@ -6,6 +6,9 @@ import { rand, randInt, pick, chance, flicker, composeMatrix, archWallGeometry, 
 import { Pedestal, Descent, rollItem } from './items.js';
 import { WeaponDrop } from './loot.js';
 import { rollWeapon } from './weapons.js';
+import { Chest, Pickup, dropCoins } from './pickups.js';
+import { Shop } from './shop.js';
+import { DealAltar } from './deals.js';
 import { Warden, pickEnemyType, eliteGroup, separateEnemies } from './enemies.js';
 import { R, along, latOf, linkIslands, COMBAT_LAYOUTS, SPECIAL_LAYOUTS } from './layouts.js';
 
@@ -67,6 +70,83 @@ class FogWall {
 }
 
 // ============================================================================
+// Locked gate — an iron portcullis with a gilded padlock. One key lifts it.
+// ============================================================================
+
+class LockedGate {
+  constructor(chamber, dir, y) {
+    this.chamber = chamber;
+    this.game = chamber.game;
+    this.open = false;
+    this.t = 0;
+    const d = DIRS[dir];
+    const lat = latOf(dir);
+    const M = this.game.materials;
+    this.bars = new THREE.Group();
+    const [x, z] = along(dir, GATE_PLANE);
+    this.bars.position.set(x, y, z);
+    this.bars.rotation.y = Math.atan2(-d.x, -d.z);
+    for (let bx = -1.75; bx <= 1.76; bx += 0.35) {
+      const bar = new THREE.Mesh(new THREE.BoxGeometry(0.09, 5.4, 0.09), M.iron);
+      bar.position.set(bx, 2.7, 0);
+      bar.castShadow = true;
+      this.bars.add(bar);
+      const spike = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.25, 4), M.iron);
+      spike.position.set(bx, -0.1, 0);
+      spike.rotation.x = Math.PI;
+      this.bars.add(spike);
+    }
+    for (const by of [0.8, 2.4, 4.0]) {
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(3.7, 0.12, 0.12), M.iron);
+      rail.position.set(0, by, 0);
+      this.bars.add(rail);
+    }
+    this.lock = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.46, 0.18), M.gold);
+    this.lock.position.set(0, 1.6, -0.2);
+    this.bars.add(this.lock);
+    const shackle = new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.04, 4, 10, Math.PI), M.gold);
+    shackle.position.set(0, 1.83, -0.2);
+    this.bars.add(shackle);
+    chamber.group.add(this.bars);
+    this.blocker = chamber.world.addBox(x - lat.x * 2 - d.x * 0.4, z - lat.z * 2 - d.z * 0.4, x + lat.x * 2 + d.x * 0.4, z + lat.z * 2 + d.z * 0.4, y - 1, y + 6);
+    const [ix, iz] = along(dir, GATE_PLANE + 1.4);
+    this.position = new THREE.Vector3(ix + chamber.ox, y, iz + chamber.oz);
+    this.radius = 2.8;
+    chamber.interactables.push(this);
+  }
+
+  get prompt() { return 'Unlock the gilded gate'; }
+  get sub() { return `Requires a key · you carry ${this.game.player.keys}`; }
+  get promptColor() { return '#f0c040'; }
+
+  interact() {
+    if (this.open) return;
+    const p = this.game.player;
+    if (p.keys <= 0) {
+      this.game.audio.play('locked');
+      this.game.hud.toast('Locked', 'Chests, foes and the merchant all carry keys', 0x9aa0b0);
+      return;
+    }
+    p.keys--;
+    this.open = true;
+    this.blocker.enabled = false;
+    const list = this.chamber.interactables;
+    list.splice(list.indexOf(this), 1);
+    this.game.audio.play('unlock');
+    this.game.audio.play('gate');
+    this.game.shake(0.2);
+  }
+
+  update(dt) {
+    if (!this.open || this.t >= 1) return;
+    this.baseY ??= this.bars.position.y;
+    this.t = Math.min(1, this.t + dt / 1.6);
+    this.bars.position.y = this.baseY + this.t * this.t * 5.2;
+    this.lock.visible = this.t < 0.1;
+  }
+}
+
+// ============================================================================
 // Chamber — one cell of a seamless floor.
 // ============================================================================
 
@@ -92,6 +172,7 @@ export class Chamber {
     this.interactables = [];
     this.pedestal = null;
     this.descent = null;
+    this.locks = [];
     this.stateTime = 0;
     this.center = { x: 0, y: 0, z: 0 };
   }
@@ -115,6 +196,7 @@ export class Chamber {
     let layout;
     if (this.type === 'start') layout = SPECIAL_LAYOUTS.shrine;
     else if (this.type === 'treasure') layout = SPECIAL_LAYOUTS.reliquary;
+    else if (this.type === 'shop') layout = SPECIAL_LAYOUTS.bazaar;
     else if (this.type === 'boss' || this.type === 'elite') layout = this.type === 'boss' || chance(0.5) ? SPECIAL_LAYOUTS.arena : COMBAT_LAYOUTS[this.floor.nextLayout()];
     else layout = COMBAT_LAYOUTS[this.floor.nextLayout()];
     this.layoutName = layout.name;
@@ -134,9 +216,19 @@ export class Chamber {
     const c = this.worldCenter();
     if (this.type === 'treasure') {
       this.pedestal = new Pedestal(this, rollItem(game.player), c.x, c.y, c.z, true);
-      new WeaponDrop(game, this, rollWeapon(game.depth, 1), new THREE.Vector3(c.x + 2.2, c.y, c.z + 1.2));
+      new WeaponDrop(game, this, rollWeapon(game.depth, 1), new THREE.Vector3(c.x + 2.4, c.y, c.z + 1.2));
+      new Chest(game, this, c.x - 2.6, c.y, c.z + 1.4, 'gold', Math.PI * 0.15);
+    }
+    if (this.type === 'shop') {
+      const s = this.shopSpot;
+      this.shop = new Shop(game, this, s.x + this.ox, this.center.y, s.z + this.oz, s.facing);
     }
     if (this.type === 'start') this.floor.startPose = { x: c.x, y: c.y, z: c.z + 3.4, yaw: 0 };
+    // Now and then a chest has been left behind in a fighting chamber.
+    if (this.type === 'combat' && chance(0.22)) {
+      const p = b.rimSpot(['hub'], 1, 1.8);
+      if (p) new Chest(game, this, p.x + this.ox, p.y, p.z + this.oz, chance(0.3) ? 'gold' : 'wood', Math.atan2(-p.x, -p.z));
+    }
     this.placeEnemies();
   }
 
@@ -211,6 +303,7 @@ export class Chamber {
     }
 
     this.buildGatehouse(b, dir, gateY);
+    if (this.type === 'treasure' && this.game.depth >= 2) this.locks.push(new LockedGate(this, dir, gateY));
     // A stub of walkway through the arch so the landing's balustrade leaves the way open; the
     // floor lays the real passage onto it.
     const [sx, sz] = along(dir, GATE_PLANE + 1);
@@ -224,8 +317,8 @@ export class Chamber {
     const d = DIRS[dir];
     const [cx, cz] = along(dir, GATE_PLANE);
     const rot = Math.atan2(-d.x, -d.z);
-    const wall = archWallGeometry(16, 12, 1.6, [{ cx: 0, halfW: 1.9, spring: 3.2, peak: 5.0 }]);
-    b.add(wall, M.brick, composeMatrix(cx, y, cz, 0, rot));
+    const wall = archWallGeometry(16, 12, 1.6, [{ cx: 0, halfW: 1.9, spring: 3.2, peak: 5.0 }], b.style.arch);
+    b.add(wall, b.sideMat, composeMatrix(cx, y, cz, 0, rot));
     b.add(worldBoxGeometry(17, 0.6, 2.2), M.trim, composeMatrix(cx, y + 12, cz, 0, rot));
     b.add(worldBoxGeometry(16, 40, 1.6), M.brick, composeMatrix(cx, y - 20.3, cz, 0, rot));
     for (const side of [-1, 1]) {
@@ -249,6 +342,75 @@ export class Chamber {
     const [gx, gz] = along(dir, GATE_PLANE - 1.4);
     b.lightSpots.push({ kind: 'warm', pos: new THREE.Vector3(gx, y + 3.6, gz), weight: 1.2, gate: true });
     if (this.floor.biome.id === 'sunken') b.vines(cx, cz, y + 11, y + 5);
+    this.dressGatehouse(b, dir, y);
+  }
+
+  /**
+   * Special chambers announce themselves from outside: the guardian's gate is hung with skulls,
+   * crimson banners and blood-red fire; the treasury's is gilded; the merchant's glows violet.
+   */
+  dressGatehouse(b, dir, y) {
+    if (!['boss', 'treasure', 'shop', 'elite'].includes(this.type)) return;
+    const M = b.M;
+    const d = DIRS[dir];
+    const rot = Math.atan2(-d.x, -d.z);
+    const face = GATE_PLANE + 0.85;
+    const out = (a, l, yy, s = 1) => {
+      const [x, z] = along(dir, face + a, l);
+      return composeMatrix(x, yy, z, 0, rot, 0, s, s, s);
+    };
+    const light = (color, l = 0) => {
+      const [x, z] = along(dir, face + 1.6, l);
+      b.lightSpots.push({ kind: 'warm', color, pos: new THREE.Vector3(x, y + 4.2, z), weight: 3, intensity: 12, distance: 12, gate: true });
+    };
+    if (this.type === 'boss') {
+      for (let i = -3; i <= 3; i++) {
+        const m = out(0.05, i * 1.1, y + 6.4 + (i === 0 ? 0.5 : 0), i === 0 ? 1.7 : 1);
+        b.add(new THREE.BoxGeometry(0.42, 0.38, 0.42), M.bone, m);
+        for (const s of [-1, 1]) b.add(new THREE.BoxGeometry(0.1, 0.09, 0.05), M.bloodGlow, m.clone().multiply(composeMatrix(s * 0.1, 0.03, 0.22)), { cast: false });
+      }
+      for (const s of [-1, 1]) {
+        const [bx, bz] = along(dir, face + 0.15, s * 3.4);
+        b.banner(bx, bz, y + 9.5, rot);
+        const m = out(1.2, s * 2.7, y);
+        b.add(new THREE.CylinderGeometry(0.45, 0.25, 1.2, 6), M.iron, m.clone().multiply(composeMatrix(0, 0.6, 0)));
+        b.add(new THREE.CylinderGeometry(0.38, 0.38, 0.08, 6), M.bloodGlow, m.clone().multiply(composeMatrix(0, 1.22, 0)), { cast: false });
+        const [ex, ez] = along(dir, face + 1.2, s * 2.7);
+        b.emitters.push({ kind: 'fire', pos: new THREE.Vector3(ex, y + 1.3, ez), spread: 0.25, color: 'blood' });
+        b.world.addCircle(ex, ez, 0.5, y - 1, y + 1.4);
+        // Horns jutting from the towers.
+        b.add(new THREE.ConeGeometry(0.35, 3.2, 5), M.bone, out(0.4, s * 6.5, y + 10.5).multiply(composeMatrix(0, 0, 0, 0, 0, -s * 0.9)));
+      }
+      light(0xff2010);
+    } else if (this.type === 'treasure') {
+      b.add(new THREE.OctahedronGeometry(0.7), M.gold, out(0.15, 0, y + 7.2));
+      b.add(new THREE.TorusGeometry(1.05, 0.12, 5, 16), M.gold, out(0.12, 0, y + 7.2));
+      for (const s of [-1, 1]) {
+        const [bx, bz] = along(dir, face + 0.15, s * 3.4);
+        b.add(new THREE.BoxGeometry(1.2, 0.08, 0.08), M.iron, composeMatrix(bx, y + 9.5, bz, 0, rot));
+        b.add(new THREE.BoxGeometry(1.0, 2.8, 0.04), M.goldCloth, composeMatrix(bx, y + 8.1, bz, 0, rot));
+        b.lanternPost(...along(dir, face + 1.5, s * 3.2), y);
+      }
+      light(0xffc040);
+    } else if (this.type === 'shop') {
+      const sign = out(0.25, 0, y + 6.6);
+      b.add(new THREE.BoxGeometry(2.4, 1.1, 0.12), M.bark, sign);
+      b.add(new THREE.CylinderGeometry(0.34, 0.34, 0.06, 10), M.gold, sign.clone().multiply(composeMatrix(-0.55, 0, 0.09, Math.PI / 2)));
+      b.add(new THREE.CylinderGeometry(0.26, 0.26, 0.06, 10), M.gold, sign.clone().multiply(composeMatrix(0.25, 0.1, 0.09, Math.PI / 2)));
+      b.add(new THREE.CylinderGeometry(0.2, 0.2, 0.06, 10), M.gold, sign.clone().multiply(composeMatrix(0.75, -0.15, 0.09, Math.PI / 2)));
+      for (const s of [-1, 1]) {
+        const m = out(0.3, s * 2.6, y + 4.2);
+        b.add(new THREE.BoxGeometry(0.3, 0.42, 0.3), M.iron, m);
+        b.add(new THREE.BoxGeometry(0.22, 0.32, 0.32), M.arcane, m, { cast: false });
+      }
+      light(0xb070ff);
+    } else if (this.type === 'elite') {
+      for (const s of [-1, 1]) {
+        const [bx, bz] = along(dir, face + 0.15, s * 3.4);
+        b.banner(bx, bz, y + 9.5, rot);
+      }
+      light(0xff8a30);
+    }
   }
 
   decorate(b) {
@@ -395,6 +557,7 @@ export class Chamber {
       game.shake(0.3);
     }
     if (this.type === 'boss') {
+      game.tookDamage = false;
       const c = this.worldCenter();
       const pp = game.player.pos;
       const dx = pp.x - c.x, dz = pp.z - c.z;
@@ -428,14 +591,44 @@ export class Chamber {
       game.hud.banner('GUARDIAN FELLED', '', 3.2);
       this.pedestal = new Pedestal(this, rollItem(game.player), c.x, c.y, c.z + 2.5);
       this.descent = new Descent(this, c.x, c.y, c.z - 4.5);
+      dropCoins(game, this, c.clone().setY(c.y + 1), 8 + game.depth * 3);
+      this.offerDeal();
     } else if (this.type === 'elite') {
       game.hud.banner('ELITE VANQUISHED', '', 2.6);
       this.pedestal = new Pedestal(this, rollItem(game.player), c.x, c.y, c.z);
       new WeaponDrop(game, this, rollWeapon(game.depth, 2), new THREE.Vector3(c.x + 2, c.y, c.z + 1.5));
+      new Pickup(game, this, 'key', c.clone().setY(c.y + 0.5));
+      dropCoins(game, this, c.clone().setY(c.y + 0.5), 5 + game.depth * 2);
     } else {
+      // Isaac-style room rewards: a relic, a chest, or a scatter of coin, keys and blood.
       game.hud.banner('AREA PURGED', '', 2.2);
-      this.pedestal = new Pedestal(this, rollItem(game.player), c.x, c.y, c.z);
+      const r = Math.random();
+      if (r < 0.4) this.pedestal = new Pedestal(this, rollItem(game.player), c.x, c.y, c.z);
+      else if (r < 0.75) {
+        const ch = new Chest(game, this, c.x, c.y, c.z, chance(0.3) ? 'gold' : 'wood', rand(0, TAU));
+        ch.group.scale.setScalar(0.01);
+        ch.grow = 0;
+      } else {
+        dropCoins(game, this, c.clone().setY(c.y + 0.5), randInt(3, 6) + game.depth);
+        if (chance(0.5)) new Pickup(game, this, chance(0.5) ? 'key' : 'vial', c.clone().setY(c.y + 0.5));
+      }
     }
+  }
+
+  /**
+   * A guardian's death may draw something's attention. Untouched victors are likelier to be
+   * noticed; anyone who has already signed a pact never sees an angel again.
+   */
+  offerDeal() {
+    const game = this.game, p = game.player;
+    const odds = 0.4 + (game.tookDamage ? 0 : 0.35) + (game.depth > 1 ? 0.1 : 0);
+    if (!chance(odds)) return;
+    const kind = p.devilDeals > 0 ? 'devil' : chance(0.42) ? 'angel' : 'devil';
+    const free = ['e', 'w', 'n', 's'].filter((d) => !this.neighbors[d]);
+    const dir = free[0] ?? 'e';
+    const [x, z] = along(dir, 9.5);
+    const d = DIRS[dir];
+    this.deal = new DealAltar(this, kind, x + this.ox, this.center.y, z + this.oz, Math.atan2(-d.x, -d.z));
   }
 
   /** Called for every chamber near the knight; `current` is true for the one they stand in. */
@@ -445,6 +638,13 @@ export class Chamber {
     for (const f of this.fogWalls) f.update(dt, t);
 
     const player = this.game.player;
+    if (current && !this.announced && ['shop', 'treasure'].includes(this.type)) {
+      const c = this.worldCenter();
+      if (Math.hypot(player.pos.x - c.x, player.pos.z - c.z) < R - 2) {
+        this.announced = true;
+        this.game.hud.banner(this.type === 'shop' ? "VAEL'S CURIOS" : 'THE TREASURY', this.type, 2.2);
+      }
+    }
     if (this.state === RoomState.DORMANT && current && player.alive) {
       const c = this.worldCenter();
       if (Math.hypot(player.pos.x - c.x, player.pos.z - c.z) < R + 0.5) this.wake();
@@ -465,6 +665,9 @@ export class Chamber {
 
     this.pedestal?.update(dt);
     this.descent?.update(dt);
+    this.deal?.update(dt);
+    this.shop?.tick(dt);
+    for (const l of this.locks) l.update(dt);
     for (const l of this.loot) l.update(dt);
     this.updateFlames(t);
 
@@ -473,7 +676,8 @@ export class Chamber {
       if (em.kind === 'fire' && Math.random() < dt * (em.rate ?? 22)) {
         glow.emit({
           pos: new THREE.Vector3(em.pos.x + rand(-em.spread, em.spread), em.pos.y, em.pos.z + rand(-em.spread, em.spread)),
-          vel: new THREE.Vector3(rand(-0.3, 0.3), rand(1.2, 2.6), rand(-0.3, 0.3)), life: rand(0.4, 0.9), size: rand(0.05, 0.12), color: pick([0xff8a2a, 0xffb040, 0xff5a1a]),
+          vel: new THREE.Vector3(rand(-0.3, 0.3), rand(1.2, 2.6), rand(-0.3, 0.3)), life: rand(0.4, 0.9), size: rand(0.05, 0.12),
+          color: em.color === 'blood' ? pick([0xff2010, 0xc00808, 0xff5030]) : pick([0xff8a2a, 0xffb040, 0xff5a1a]),
         });
       } else if (em.kind === 'motes' && Math.random() < dt * 8) {
         glow.emit({

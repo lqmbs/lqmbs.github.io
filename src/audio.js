@@ -306,6 +306,79 @@ export class AudioEngine {
       case 'distant':
         this.noise({ dur: 2.2, type: 'lowpass', f: 180, gain: 0.25, attack: 0.6, dest: this.reverb });
         break;
+      case 'coin':
+        this.tone({ dur: 0.08, type: 'square', f: 1560 * rand(0.97, 1.03), gain: 0.035 });
+        this.tone({ t: 0.05, dur: 0.18, type: 'square', f: 2090 * rand(0.97, 1.03), gain: 0.03 });
+        break;
+      case 'key':
+        this.metal(1400, 0.4, 0.05);
+        this.metal(1900, 0.3, 0.035, 0.08);
+        break;
+      case 'locked':
+        this.noise({ dur: 0.08, f: 900, q: 4, gain: 0.12 });
+        this.noise({ t: 0.1, dur: 0.08, f: 700, q: 4, gain: 0.1 });
+        break;
+      case 'unlock':
+        this.metal(900, 0.3, 0.07);
+        this.noise({ t: 0.05, dur: 0.1, f: 2400, q: 2, gain: 0.08 });
+        break;
+      case 'gate':
+        this.noise({ dur: 1.4, type: 'lowpass', f: 400, gain: 0.2, attack: 0.1 });
+        for (let i = 0; i < 6; i++) this.noise({ t: i * 0.2, dur: 0.05, f: 1800, q: 6, gain: 0.05 });
+        break;
+      case 'chest':
+        this.noise({ dur: 0.35, type: 'lowpass', f: 500, gain: 0.18 });
+        this.tone({ t: 0.25, dur: 0.6, type: 'triangle', f: 660, gain: 0.05 });
+        this.tone({ t: 0.35, dur: 0.6, type: 'triangle', f: 990, gain: 0.04 });
+        break;
+      case 'zap':
+        this.noise({ dur: 0.18, type: 'highpass', f: 2500, gain: 0.12 });
+        this.tone({ dur: 0.15, type: 'sawtooth', f: 180, f2: 60, gain: 0.06 });
+        break;
+      case 'shock':
+        this.noise({ dur: 0.4, type: 'bandpass', f: 1200, f2: 300, q: 1, gain: 0.2 });
+        this.metal(620, 0.8, 0.06);
+        break;
+      case 'bloom':
+        this.noise({ dur: 0.3, type: 'lowpass', f: 700, f2: 150, gain: 0.2 });
+        break;
+      case 'devil':
+        this.tone({ dur: 2.2, type: 'sawtooth', f: 43.6, gain: 0.14, attack: 0.3 });
+        this.tone({ dur: 2.2, type: 'sawtooth', f: 46.2, gain: 0.12, attack: 0.3 });
+        this.noise({ dur: 1.4, type: 'lowpass', f: 220, gain: 0.25, attack: 0.2, dest: this.reverb });
+        break;
+      case 'angel':
+        for (const [f, t] of [[523, 0], [659, 0.08], [784, 0.16], [1046, 0.24]]) this.tone({ t, dur: 1.8, type: 'sine', f, gain: 0.045, attack: 0.15, dest: this.reverb });
+        break;
+      case 'halo':
+        this.tone({ dur: 0.25, type: 'sine', f: 1318, f2: 1760, gain: 0.03 });
+        break;
+      case 'ult':
+        this.tone({ dur: 0.9, type: 'sawtooth', f: 110, f2: 220, gain: 0.08, attack: 0.05 });
+        this.metal(440, 1.4, 0.07);
+        this.noise({ dur: 0.6, type: 'bandpass', f: 400, f2: 3000, q: 1, gain: 0.12 });
+        break;
+      case 'ult-ready':
+        this.tone({ dur: 0.5, type: 'sine', f: 880, gain: 0.05 });
+        this.tone({ t: 0.1, dur: 0.7, type: 'sine', f: 1320, gain: 0.045 });
+        break;
+      case 'sunfall':
+        this.noise({ dur: 1.0, type: 'bandpass', f: 300, f2: 2400, q: 0.8, gain: 0.18, attack: 0.5 });
+        break;
+      case 'merchant':
+        // A wheezy, delighted chuckle.
+        for (let i = 0; i < 4; i++) this.tone({ t: i * 0.09, dur: 0.07, type: 'triangle', f: 330 - i * 20, f2: 260 - i * 20, gain: 0.05 });
+        break;
+      case 'blip':
+        this.tone({ dur: 0.03, type: 'square', f: rand(360, 480), gain: 0.012 });
+        break;
+      case 'tick':
+        this.tone({ dur: 0.04, type: 'triangle', f: 900, gain: 0.03 });
+        break;
+      case 'buy':
+        for (let i = 0; i < 5; i++) this.tone({ t: i * 0.05, dur: 0.1, type: 'square', f: 1400 + i * 180, gain: 0.025 });
+        this.metal(1200, 0.6, 0.04, 0.2);
+        break;
     }
   }
 

@@ -73,7 +73,9 @@ export class Menus {
       passive.append(el('b', '', `${c.passive.name}. `), document.createTextNode(c.passive.desc));
       const skill = el('div', 'kit-row');
       skill.append(el('b', '', `[Q] ${c.skill.name}. `), document.createTextNode(c.skill.desc));
-      kit.append(passive, skill);
+      const ult = el('div', 'kit-row');
+      ult.append(el('b', '', `[R] ${c.ultimate.name}. `), document.createTextNode(c.ultimate.desc));
+      kit.append(passive, skill, ult);
       card.append(kit);
       const choose = () => {
         this.game.chooseClass(c.id);

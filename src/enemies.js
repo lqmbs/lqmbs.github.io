@@ -61,21 +61,43 @@ export class GroundTelegraph {
  * spells (wand, staff) are bolts owned by the player.
  */
 export class Bolt {
-  constructor(game, pos, dir, owner, color, { damage = 14, speed = 12, burn = 0, pierce = false, size = 1 } = {}) {
+  constructor(game, pos, dir, owner, color, { damage = 14, speed = 12, burn = 0, pierce = false, size = 1, homing = 0, shape = 'bolt', life = 4, spell = true } = {}) {
     this.game = game;
     this.owner = owner;
     this.color = color;
     this.damage = damage;
     this.burn = burn;
     this.pierce = pierce;
+    this.homing = homing;
+    this.shape = shape;
+    this.spell = spell;
     this.hit = new Set();
     this.vel = dir.clone().multiplyScalar(speed);
-    this.life = 4;
-    this.mesh = new THREE.Mesh(new THREE.OctahedronGeometry(0.16 * size), new THREE.MeshBasicMaterial({ color, fog: false }));
-    this.mesh.scale.set(0.7, 0.7, 1.8);
+    this.speed = speed;
+    this.life = life;
+    const geo = shape === 'crescent'
+      ? new THREE.TorusGeometry(0.7 * size, 0.07 * size, 3, 14, Math.PI * 0.9).rotateZ(Math.PI * 0.05).rotateX(Math.PI / 2)
+      : new THREE.OctahedronGeometry(0.16 * size);
+    this.mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color, fog: false, side: THREE.DoubleSide }));
+    if (shape !== 'crescent') this.mesh.scale.set(0.7, 0.7, 1.8);
     this.mesh.position.copy(pos);
     this.mesh.lookAt(pos.clone().add(dir));
     game.scene.add(this.mesh);
+  }
+
+  /** Bend the flight towards the nearest living foe. */
+  steer(dt) {
+    const p = this.mesh.position;
+    let best = null, bd = 16;
+    for (const e of this.game.nearbyEnemies()) {
+      if (!e.active || this.hit.has(e)) continue;
+      const d = Math.hypot(e.pos.x - p.x, e.pos.z - p.z);
+      if (d < bd) { bd = d; best = e; }
+    }
+    if (!best) return;
+    const want = _v.set(best.pos.x - p.x, best.pos.y + best.height * 0.55 - p.y, best.pos.z - p.z).normalize().multiplyScalar(this.speed);
+    this.vel.lerp(want, 1 - Math.exp(-this.homing * dt)).setLength(this.speed);
+    this.mesh.lookAt(p.clone().add(this.vel));
   }
 
   get pos() { return this.mesh.position; }
@@ -83,8 +105,9 @@ export class Bolt {
   update(dt) {
     this.life -= dt;
     const p = this.mesh.position;
+    if (this.homing && this.owner === this.game.player) this.steer(dt);
     p.addScaledVector(this.vel, dt);
-    this.mesh.rotation.z += dt * 12;
+    if (this.shape !== 'crescent') this.mesh.rotation.z += dt * 12;
     if (Math.random() < dt * 60) {
       this.game.glow.emit({ pos: p, vel: new THREE.Vector3(rand(-0.3, 0.3), rand(-0.3, 0.3), rand(-0.3, 0.3)), life: rand(0.2, 0.4), size: 0.06, color: this.color });
     }
@@ -120,7 +143,7 @@ export class Bolt {
           e.takeRawDamage(dmg, dir, 3);
           if (e.alive) e.addPosture(8);
           if (e.alive && this.burn) e.ignite(3, this.burn);
-          this.game.onEnemyHit(e, e.alive ? 'spell' : 'kill', dir, dmg);
+          this.game.onEnemyHit(e, e.alive ? 'spell' : 'kill', dir, dmg, { proc: !this.spell });
           if (!this.pierce) return this.dispose(true);
         }
       }
